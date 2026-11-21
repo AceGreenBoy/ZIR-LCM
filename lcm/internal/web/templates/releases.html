@@ -1,0 +1,27 @@
+{{define "content"}}
+<h1>Релізи</h1>
+<div class="scroll"><table><tr><th>Версія</th><th>Канал</th><th>Прошивки за профілями</th><th>Веб</th><th>Нотатки</th><th></th></tr>
+{{range .Data.List}}<tr><td><b>{{.Version}}</b><div class="muted">{{dt .CreatedAt}}</div></td>
+<td>{{if eq .Channel "stable"}}<span class="tag ok">stable</span>{{else}}<span class="tag warn">beta</span>{{end}}{{if .Critical}} <span class="tag bad">критичний</span>{{end}}</td>
+<td>{{range $p, $v := .AppVers}}{{$p}}: {{$v}}<br>{{end}}</td><td>{{or .WWWVersion "—"}}</td><td>{{.Notes}}</td>
+<td>{{if isroot $.Actor}}
+{{if eq .Channel "beta"}}<form method="post" action="/releases/{{.ID}}/promote"><input type="hidden" name="csrf" value="{{$.CSRF}}">
+<label class="inline"><input type="checkbox" name="critical"> критичний</label> <button>В stable</button></form>
+{{else}}<form method="post" action="/releases/{{.ID}}/critical"><input type="hidden" name="csrf" value="{{$.CSRF}}">
+{{if .Critical}}<input type="hidden" name="critical" value="0"><button class="sec">Зняти «критичний»</button>{{else}}<input type="hidden" name="critical" value="1"><button class="sec">Позначити критичним</button>{{end}}</form>{{end}}
+{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="muted">Релізів ще немає</td></tr>{{end}}</table></div>
+{{if isroot .Actor}}
+<h2>Новий реліз (канал beta)</h2>
+<form class="card" method="post" action="/releases"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<div class="row"><input type="text" name="version" placeholder="1.4.0 або 1.5.0-beta.1" required>
+<select name="www"><option value="">— без веб-інтерфейсу —</option>{{range .Data.WWW}}<option value="{{.ID}}">www {{.Version}} (api {{.WwwAPI}}) · {{dt .CreatedAt}}</option>{{end}}</select></div>
+<table><tr><th>Профіль</th><th>Збірка прошивки (порожньо — реліз профілю не стосується)</th></tr>
+{{range .Data.Profiles}}{{$builds := index $.Data.Apps .Code}}<tr><td>{{.Code}}</td><td><select name="app_{{.Code}}"><option value="">—</option>
+{{range $builds}}<option value="{{.ID}}">{{.Version}} · {{dt .CreatedAt}} · {{short .SHA256}}{{if .Unchanged}} · код не змінився{{end}}</option>{{end}}</select></td></tr>{{end}}
+</table>
+<div class="row"><textarea name="notes" placeholder="Що змінилося"></textarea></div>
+<p class="muted">Версія релізу зазвичай збігається з версією прошивки. Реліз лише з новим веб-інтерфейсом може містити ту саму збірку прошивки, прилад її не завантажить.</p>
+<button>Створити</button></form>
+{{end}}
+{{end}}

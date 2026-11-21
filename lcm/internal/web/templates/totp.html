@@ -1,0 +1,12 @@
+{{define "content"}}
+<div class="login card">
+{{if .Data.Setup}}
+<h1>Налаштування TOTP</h1>
+<p>Відскануйте код у застосунку автентифікації (Google Authenticator, Aegis, 1Password…) і введіть 6 цифр.</p>
+<p><img src="{{.Data.QR}}" width="220" height="220" alt="QR"></p>
+<p class="muted">Або введіть ключ вручну:<br><code>{{.Data.Secret}}</code></p>
+{{else}}<h1>Код TOTP</h1>{{end}}
+<form method="post" action="/login/totp"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" required autofocus>
+<button>Увійти</button></form></div>
+{{end}}

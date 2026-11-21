@@ -1,0 +1,44 @@
+# Production on the VPS behind the existing Traefik (external network "traefik").
+# Before the first start see README.md → «Розгортання».
+services:
+  lcm:
+    image: zir/lcm:${LCM_VERSION:-latest}
+    build: ..
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://lcm:${POSTGRES_PASSWORD}@postgres/lcm?sslmode=disable
+      MASTER_KEY_FILE: /run/secrets/master_key
+      PUBLIC_URL: https://${LCM_DOMAIN}
+    secrets: [master_key]
+    volumes: [ "/srv/lcm/data:/data" ]
+    depends_on: [postgres]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik
+      - traefik.http.routers.lcm.rule=Host(`${LCM_DOMAIN}`)
+      - traefik.http.routers.lcm.entrypoints=websecure
+      - traefik.http.routers.lcm.tls.certresolver=letsencrypt
+      - traefik.http.services.lcm.loadbalancer.server.port=8080
+      # Rate limits on login and registration endpoints.
+      - traefik.http.routers.lcm-limited.rule=Host(`${LCM_DOMAIN}`) && (Path(`/login`) || PathPrefix(`/login/`) || PathPrefix(`/dev/v1/register/`) || PathPrefix(`/dev/v1/auth/`))
+      - traefik.http.routers.lcm-limited.entrypoints=websecure
+      - traefik.http.routers.lcm-limited.tls.certresolver=letsencrypt
+      - traefik.http.routers.lcm-limited.middlewares.lcm-ratelimit
+      - traefik.http.routers.lcm-limited.service=lcm
+      - traefik.http.middlewares.lcm-ratelimit.ratelimit.average=10
+      - traefik.http.middlewares.lcm-ratelimit.ratelimit.burst=20
+    networks: [traefik, internal]
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lcm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: lcm
+    volumes: [ "/srv/lcm/pg:/var/lib/postgresql/data" ]
+    networks: [internal]
+secrets:
+  master_key: { file: /srv/lcm/secrets/master.key }   # chmod 600
+networks:
+  traefik: { external: true }
+  internal: {}

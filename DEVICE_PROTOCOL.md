@@ -1,0 +1,217 @@
+# Протокол устройства (`/dev/v1`) — точные форматы
+
+Документ для разработчика прошивки. Описывает протокол так, как он реализован в `lcm`
+(MVP). Назначение шагов и требования к поведению — в `ARCHITECTURE.md` (раздел 7) и
+`FIRMWARE_REQUIREMENTS.md`. Эталонная реализация клиента на Go — `lcm/internal/devicesim`:
+она делает те же проверки, что должна делать прошивка.
+
+## Общие правила
+
+- Все запросы — HTTPS к `https://fw.<домен>`, тела и ответы — JSON (`Content-Type: application/json`).
+- Ошибка: HTTP 4xx/5xx и `{"error": "<код>", "message": "<текст>"}`. Коды перечислены у эндпоинтов.
+- **base64url** без `=` (RFC 4648 §5) для всех двоичных полей. Сервер принимает и обычный base64.
+- **Публичный ключ P-256** — 65 байт несжатой точки (`0x04 || X || Y`), в base64url.
+- **Подпись ES256** — ECDSA P-256 над SHA-256, 64 байта `r || s` (каждое 32 байта big-endian), base64url.
+  В mbedTLS: `mbedtls_ecdsa_sign` → `mbedtls_mpi_write_binary(r, 32)` и `(s, 32)`.
+- Ключи сервера — `zir_server_keys.h` из `lcmctl export-pubkeys`: таблица `{kid, pem}` на каждое
+  назначение. Ключ для проверки выбирается по `kid` из заголовка JWS или контейнера. Ключ с `kid`
+  другого назначения (например, `config-…` для манифеста) не принимается.
+
+### Подпись запросов устройством
+
+Запросы регистрации и аутентификации подписываются ключом `dev_sign`. Подпись — в заголовке:
+
+```
+X-Zir-Sig: <base64url(r||s)>
+```
+
+Подписываемое сообщение (байты UTF-8):
+
+```
+METHOD "\n" REQUEST_URI "\n" BODY
+```
+
+- `METHOD` — `GET` или `POST`;
+- `REQUEST_URI` — путь и строка запроса **ровно как отправлены**, например
+  `/dev/v1/register/status?request_id=0b0e…`;
+- `BODY` — тело запроса как есть (для `GET` — пусто, сообщение заканчивается на `\n`).
+
+### ECIES («zir box»)
+
+Для передачи секретов: `K_ota` на устройство, пароль и телеметрия на сервер.
+
+```
+eph            = новая пара P-256
+shared         = ECDH(eph_priv, recipient_pub)          — 32 байта X-координаты
+key            = HKDF-SHA256(ikm=shared, salt=пусто, info=<назначение>, L=32)
+iv             = 12 случайных байт
+ct || tag      = AES-256-GCM(key, iv, plaintext, aad)    — tag 16 байт в конце
+JSON           = {"epk": b64url(65-байтный eph_pub), "iv": b64url(iv), "ct": b64url(ct||tag)}
+```
+
+| Назначение (`info`) | От → кому | `aad` | Что внутри |
+|---|---|---|---|
+| `zir-reg/1` | устройство → `K_telemetry` | MAC в нижнем регистре, `28:05:a5:2c:ca:30` | начальный пароль `zir-XXXXX` |
+| `zir-otakey/1` | сервер → `dev_kex` | `device_id` | PEM приватного ключа RSA-3072 `K_ota` (`-----BEGIN RSA PRIVATE KEY-----`) |
+| `zir-pwd/1` | устройство → `K_telemetry` | `device_id` | новый пароль точки доступа |
+| `zir-tlm/1`, `zir-core/1` | устройство → `K_telemetry` | — | телеметрия, core dump (после MVP) |
+
+### JWS
+
+Компактная форма `b64url(header).b64url(payload).b64url(r||s)`, заголовок
+`{"alg":"ES256","kid":"<kid>","typ":"<тип>"}`. Подпись — над ASCII-строкой
+`b64url(header) + "." + b64url(payload)`. **Сначала проверить подпись, потом разбирать payload.**
+
+## Регистрация (bootstrap)
+
+### `POST /dev/v1/register/request` — подписан `dev_sign` из тела
+
+```json
+{ "mac": "28:05:a5:2c:ca:30", "chip_rev": "3.1", "bootstrap_version": "0.1.0",
+  "dev_sign_pub": "<b64url 65 байт>", "dev_kex_pub": "<b64url 65 байт>",
+  "web_password": { "epk": "…", "iv": "…", "ct": "…" } }
+```
+
+Ответ `200`: `{"request_id": "<uuid>", "claim_code": "6W0MB6EA", "expires_in": 1800}`.
+Код показать на экране как `6W0M-B6EA`.
+
+Ошибки: `400 bad_request | bad_password`, `401 bad_signature`.
+
+### `GET /dev/v1/register/status?request_id=<uuid>` — подписан `dev_sign` (тело пустое)
+
+Опрашивать каждые 5 с. Ответы `200`:
+
+```json
+{ "status": "pending" }
+{ "status": "expired" }            — начать регистрацию заново (новый запрос)
+{ "status": "approved", "device_id": "<uuid>", "serial": "ZIR3M-000001",
+  "config": "<JWS zir-config/1>", "ota_key": { "epk": "…", "iv": "…", "ct": "…" } }
+```
+
+После `approved` bootstrap:
+1. проверяет `config` (подпись ключом `config-*`, `device_id`, `mac`, `profile`);
+2. расшифровывает `ota_key` своим `dev_kex` (`info=zir-otakey/1`, `aad=device_id`);
+3. записывает `device_id`, `serial`, ключи, `config`, `ota_key` в `identity`;
+4. переходит к обновлению.
+
+## Аутентификация
+
+### `POST /dev/v1/auth/challenge` (без подписи)
+
+`{"device_id": "<uuid>"}` → `{"nonce": "<b64url 32 байта>", "expires_in": 60}`. `401 unknown_device`.
+
+### `POST /dev/v1/auth/session` — подписан `dev_sign`
+
+```json
+{ "device_id": "…", "nonce": "<из challenge>", "mac": "28:05:a5:2c:ca:30",
+  "app_version": "1.0.0",
+  "app_sha256": "<hex SHA-256 установленного подписанного образа, как он пришёл с сервера; пусто, если неизвестен>",
+  "www_sha256": "<hex SHA-256 установленного www.tar; пусто, если неизвестен>",
+  "release_id": "<uuid установленного релиза; пусто, если неизвестен>" }
+```
+
+Ответ: `{"session_token": "<b64url>", "expires_in": 900, "server_time": 1762600000}`.
+Дальше — `Authorization: Bearer <session_token>`. `server_time` можно использовать как время, пока нет SNTP.
+
+Ошибки: `401 unknown_device | bad_signature | bad_nonce`.
+
+`app_sha256`, `www_sha256` и `release_id` устройство хранит в `nvs` после успешной установки
+(значения из манифеста). По ним сервер решает, что скачивать заново.
+
+## Обновления
+
+### `GET /dev/v1/update`
+
+```json
+{ "manifest": "<JWS zir-manifest/1>" | null, "config_version": 7, "server_time": 1762600000 }
+```
+
+`403 device_revoked` — показать «Оновлення недоступні», не спрашивать до перезагрузки.
+Если `config_version` больше своей — `GET /dev/v1/config`.
+
+Payload манифеста:
+
+```json
+{ "typ": "zir-manifest/1", "device_id": "…", "profile": "zir3m-full",
+  "release_id": "…", "version": "1.4.0", "mode": "button | auto | engineer", "critical": false,
+  "app": { "needed": true, "url": "/dev/v1/artifacts/<release>/app",
+           "size": 1311232, "img_size": 1310720, "sha256": "<hex>", "version": "1.4.0",
+           "enc": "esp_encrypted_img" },
+  "www": { "needed": true, "url": "/dev/v1/artifacts/<release>/www", "format": "tar",
+           "size": 143360, "sha256": "<hex www.tar>", "version": "1.4.0", "www_api": 3 } | null,
+  "iat": 1762600000, "exp": 1762603600 }
+```
+
+- `app.size` — сколько байт скачивать (зашифрованный образ), `app.img_size` — размер после
+  расшифровки, `app.sha256` — SHA-256 **расшифрованного подписанного** образа.
+- Проверить: подпись (`manifest-*`), `device_id`, `profile` (вкомпилированный), `exp`.
+
+### `GET /dev/v1/artifacts/{release}/app`
+
+Образ `esp_encrypted_img` v2 (схема RSA-3072), зашифрованный ключом `K_ota` этого устройства.
+Расшифровка — компонент `espressif/esp_encrypted_img` (`decrypt_cb` в `esp_https_ota`), ключ —
+PEM из `identity/ota_key`. Поддерживается `Range` для докачки (сервер кеширует образ, байты не
+меняются). `403 device_revoked`, `404 not_found`.
+
+### `GET /dev/v1/artifacts/{release}/www`
+
+`www.tar` как есть. Проверка — SHA-256 из манифеста (раздел 6.2 требований).
+
+### `POST /dev/v1/update/report`
+
+```json
+{ "release_id": "…", "status": "downloading | installed | failed | rolled_back",
+  "error": "текст, если есть", "mode": "<mode из манифеста>" }
+```
+
+После `installed` сервер считает релиз установленным и снимает назначение инженера.
+
+## Конфиг
+
+### `GET /dev/v1/config`
+
+`{"version": 7, "config": "<JWS zir-config/1>"}`. Payload:
+
+```json
+{ "typ": "zir-config/1", "device_id": "…", "mac": "28:05:a5:2c:ca:30", "profile": "zir3m-full",
+  "version": 7, "iat": 1762600000,
+  "modules": { "ft3500": true, "rx5808": true, "ta8804": false },
+  "ranges":  { "ft3500": {"min": 2000, "max": 4050}, "rx5808": {"min": 4900, "max": 6184},
+               "ta8804": {"min": 900, "max": 2250} } }
+```
+
+Принимать, только если `version` больше текущей и подпись (`config-*`), `device_id`, `mac`, `profile`
+совпадают.
+
+## Пароль точки доступа
+
+### `POST /dev/v1/web-password`
+
+`{"password": <box zir-pwd/1, aad=device_id>, "changed_at": <unix или 0>}` → `{"ok": true}`.
+Повторять при каждой связи, пока сервер не ответит `200`.
+
+## Контейнер `.zwww` (ручная загрузка веб-морды)
+
+```
+"ZWWW" | u16 LE hlen | header (hlen байт JSON) | u16 LE slen | подпись (slen = 64 байта r||s) | www.tar
+header = {"typ":"zir-www/1","kid":"www-…","version":"1.4.0","www_api":3,"size":143360,"sha256":"<hex www.tar>"}
+```
+
+Подпись ES256 ключом `kid` (назначение `www`) над байтами `header`. Порядок проверки:
+1. прочитать заголовок, проверить подпись;
+2. проверить `www_api`;
+3. распаковывать архив потоково, считая SHA-256;
+4. сверить хеш и размер, затем записать маркер `.valid`.
+
+## Образ прошивки: что проверяет сервер при загрузке
+
+- Непривязанный к ключу образ (`CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n`), ESP32.
+- `esp_app_desc_t` по смещению 32, сразу за ним `zir_custom_desc_t` (смещение 288):
+  `magic 0x5A495244`, `desc_version`, `www_api`, `profile[32]`, `version[32]`, `flags` (бит 0 — dev),
+  `reserved[52]`. `version` — semver, профиль должен существовать на сервере.
+- Сервер подписывает образ блоком Secure Boot V2 (RSA-3072, совместим с
+  `espsecure.py sign_data --version 2`) — проверено тестом.
+
+## Ещё не реализовано (ответ `501 not_implemented`)
+
+`POST /telemetry`, `POST /coredump`, `POST /config/request`, `POST /engineer/confirm`.

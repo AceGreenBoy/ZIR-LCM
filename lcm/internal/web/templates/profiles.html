@@ -1,0 +1,23 @@
+{{define "content"}}
+<h1>Профілі заліза</h1>
+<div class="scroll"><table><tr><th>Код</th><th>Назва</th><th>Модулі (межі частот, МГц)</th><th></th></tr>
+{{range .Data.List}}<tr><td class="mono">{{.Code}}</td><td>{{.Name}}<div class="muted">{{.Description}}</div></td>
+<td>{{range .Modules}}{{label .Name}}: {{.Limit.Min}}–{{.Limit.Max}}<br>{{end}}</td>
+<td>{{if isroot $.Actor}}<a href="/profiles?edit={{.ID}}">змінити</a>{{end}}</td></tr>
+{{else}}<tr><td colspan="4" class="muted">Профілів ще немає.</td></tr>{{end}}</table></div>
+{{if isroot .Actor}}{{$e := .Data.Edit}}
+<h2>{{if $e}}Змінити {{$e.Code}}{{else}}Новий профіль{{end}}</h2>
+<form class="card" method="post" action="/profiles"><input type="hidden" name="csrf" value="{{.CSRF}}">
+{{if $e}}<input type="hidden" name="id" value="{{$e.ID}}"><input type="hidden" name="code" value="{{$e.Code}}">{{end}}
+<div class="row">{{if not $e}}<input type="text" name="code" placeholder="код, напр. zir3m-full" required>{{end}}
+<input type="text" name="name" placeholder="Назва" value="{{if $e}}{{$e.Name}}{{end}}" required size="30"></div>
+<div class="row"><input type="text" name="description" placeholder="Опис" value="{{if $e}}{{$e.Description}}{{end}}" size="60"></div>
+<p class="muted">Код профілю = каталог <code>profiles/&lt;код&gt;/</code> у репозиторії прошивки і <code>ZIR_PROFILE</code> у збірці. Після створення не змінюється.</p>
+<table><tr><th>Модуль у прошивці профілю</th><th>Мін. межа</th><th>Макс. межа</th></tr>
+{{range .Data.Catalog}}{{$m := .}}{{$cur := ""}}{{with $e}}{{$cur = inmods .Modules $m.Name}}{{end}}
+<tr><td><label class="inline"><input type="checkbox" name="mod_{{.Name}}" {{if or (not $e) $cur}}checked{{end}}> {{label .Name}}</label></td>
+<td><input type="number" name="lmin_{{.Name}}" value="{{if $cur}}{{$cur.Limit.Min}}{{else}}{{.Limit.Min}}{{end}}"></td>
+<td><input type="number" name="lmax_{{.Name}}" value="{{if $cur}}{{$cur.Limit.Max}}{{else}}{{.Limit.Max}}{{end}}"></td></tr>{{end}}
+</table><p><button>Зберегти профіль</button></p></form>
+{{end}}
+{{end}}

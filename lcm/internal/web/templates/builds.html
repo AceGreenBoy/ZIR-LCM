@@ -1,0 +1,26 @@
+{{define "content"}}
+<h1>Збірки</h1>
+{{if isroot .Actor}}
+<div class="grid">
+<form class="card" method="post" action="/builds/app" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<h2 style="margin-top:0">Прошивка</h2>
+<p class="muted">Непідписаний <code>firmware.bin</code>, зібраний з <code>sdkconfig.release.defaults</code> і профілем.
+Сервер прочитає профіль і версію з <code>zir_custom_desc_t</code>, відхилить збірку для розробки й підпише образ.</p>
+<div class="row">Образ: <input type="file" name="app" accept=".bin" required></div>
+<div class="row">ELF (для розбору core dump): <input type="file" name="elf" accept=".elf"></div>
+<button>Завантажити й підписати</button></form>
+<form class="card" method="post" action="/builds/www" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<h2 style="margin-top:0">Веб-інтерфейс</h2>
+<p class="muted"><code>www.tar</code> з <code>npm run build &amp;&amp; npm run pack</code>. Усередині має бути нестиснутий <code>manifest.json</code> з <code>version</code> і <code>www_api</code>.</p>
+<div class="row"><input type="file" name="www" accept=".tar" required></div>
+<button>Завантажити</button></form>
+</div>
+{{end}}
+<div class="scroll"><table><tr><th>Час</th><th>Тип</th><th>Профіль</th><th>Версія</th><th>www_api</th><th>Розмір</th><th>SHA-256</th><th>Файли</th></tr>
+{{range .Data.List}}<tr><td>{{dt .CreatedAt}}<div class="muted">{{.CreatedBy}}</div></td><td>{{.Kind}}</td><td>{{.Profile}}</td><td>{{.Version}}</td><td>{{.WwwAPI}}</td><td>{{kb .Size}}</td>
+<td class="mono">{{short .SHA256}}{{if .Unchanged}}<br><span class="tag">код не змінився</span>{{end}}</td>
+<td>{{if eq .Kind "app"}}<a href="/builds/{{.ID}}/app.bin">app.bin (підписаний)</a>{{if .HasELF}}<br><a href="/builds/{{.ID}}/app.elf">app.elf</a>{{end}}
+{{else}}<a href="/builds/{{.ID}}/www.zwww">.zwww</a><br><a href="/builds/{{.ID}}/www.tar">www.tar</a>{{end}}</td></tr>
+{{else}}<tr><td colspan="8" class="muted">Збірок ще немає</td></tr>{{end}}</table></div>
+<p class="muted">Підписаний app.bin можна прошити по USB (<code>esptool.py write_flash 0x10000 app.bin</code>), щоб повернути прилад зі збірки для розробки в цикл OTA.</p>
+{{end}}

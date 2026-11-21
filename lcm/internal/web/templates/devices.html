@@ -1,0 +1,14 @@
+{{define "content"}}
+<h1>Прилади</h1>
+<form class="row" method="get"><input type="search" name="q" value="{{.Data.Q}}" placeholder="Серійний номер, MAC, профіль, версія"><button class="sec">Шукати</button></form>
+<div class="scroll"><table>
+<tr><th>Серійний</th><th>MAC</th><th>Профіль</th><th>Версія</th><th>Стан</th><th>Остання зв'язок</th></tr>
+{{range .Data.List}}<tr>
+<td><a href="/devices/{{.ID}}">{{.Serial}}</a></td><td class="mono">{{.MAC}}</td><td>{{.Profile}}</td>
+<td>{{if .CurrentRelease}}{{.CurrentRelease}}{{else}}{{.CurrentVersion}}{{end}}{{if .PendingRelease}} → <span class="tag warn">{{.PendingRelease}}</span>{{end}}</td>
+<td>{{if eq .Status "revoked"}}<span class="tag bad">відкликано</span>{{else}}<span class="tag ok">активний</span>{{end}}
+{{if .IsTest}} <span class="tag">тестовий</span>{{end}}{{if .Pinned}} <span class="tag warn">закріплено</span>{{end}}</td>
+<td>{{dtp .LastSeen}}</td></tr>
+{{else}}<tr><td colspan="6" class="muted">Приладів ще немає. Зареєструйте перший на сторінці «Реєстрація».</td></tr>{{end}}
+</table></div>
+{{end}}

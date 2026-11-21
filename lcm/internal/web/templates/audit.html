@@ -1,0 +1,6 @@
+{{define "content"}}
+<h1>Журнал аудиту</h1>
+<div class="scroll"><table><tr><th>Час</th><th>Хто</th><th>Дія</th><th>Об'єкт</th><th>Деталі</th><th>IP</th></tr>
+{{range .Data}}<tr><td>{{dt .At}}</td><td>{{.ActorType}} {{.Actor}}</td><td>{{.Action}}</td><td>{{.TargetType}} <span class="mono">{{short .TargetID}}</span></td>
+<td class="mono"><pre>{{.Details}}</pre></td><td>{{.IP}}</td></tr>{{end}}</table></div>
+{{end}}

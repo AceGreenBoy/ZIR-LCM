@@ -1,0 +1,63 @@
+{{define "content"}}{{$d := .Data.D}}{{$csrf := .CSRF}}
+<h1>{{$d.Serial}} {{if eq $d.Status "revoked"}}<span class="tag bad">відкликано</span>{{end}}</h1>
+<div class="grid">
+<div class="card"><dl>
+<dt>MAC</dt><dd class="mono">{{$d.MAC}}</dd>
+<dt>Профіль</dt><dd>{{$d.Profile}}</dd>
+<dt>Ревізія чипа</dt><dd>{{$d.ChipRev}}</dd>
+<dt>Прошивка</dt><dd>{{or $d.CurrentVersion "—"}}</dd>
+<dt>Реліз</dt><dd>{{or $d.CurrentRelease "—"}}</dd>
+<dt>Призначено</dt><dd>{{or $d.PendingRelease "—"}}</dd>
+<dt>Пропозиція зараз</dt><dd>{{with .Data.Offer}}{{.Version}} ({{.Mode}}){{else}}—{{end}}</dd>
+<dt>Конфігурація</dt><dd>v{{$d.ConfigVersion}}</dd>
+<dt>Зареєстровано</dt><dd>{{dt $d.RegisteredAt}} · {{$d.RegisteredBy}}</dd>
+<dt>Остання зв'язок</dt><dd>{{dtp $d.LastSeen}} {{$d.LastIP}}</dd>
+{{if $d.RevokeReason}}<dt>Причина відкликання</dt><dd>{{$d.RevokeReason}}</dd>{{end}}
+</dl></div>
+
+{{if has .Actor "engineer"}}
+<div class="card"><h2 style="margin-top:0">Обслуговування</h2>
+<form method="post" action="/devices/{{$d.ID}}/flags"><input type="hidden" name="csrf" value="{{$csrf}}">
+<div class="row"><label class="inline"><input type="checkbox" name="is_test" {{if $d.IsTest}}checked{{end}}> Тестовий (критичні релізи не ставляться автоматично)</label></div>
+<div class="row"><label class="inline"><input type="checkbox" name="pinned" {{if $d.Pinned}}checked{{end}}> Закріпити версію (оновлення не пропонуються)</label></div>
+<button class="sec">Зберегти</button></form>
+<h2>Встановити версію</h2>
+<form class="row" method="post" action="/devices/{{$d.ID}}/install"><input type="hidden" name="csrf" value="{{$csrf}}">
+<select name="release_id"><option value="">— зняти призначення —</option>
+{{range .Data.Releases}}<option value="{{.ID}}" {{if eq .ID $d.PendingReleaseID}}selected{{end}}>{{.Version}} · {{.Channel}}</option>{{end}}</select>
+<button>Призначити</button></form>
+<p class="muted">Прилад поставить призначену версію при наступній перевірці (будь-яку, у тому числі beta і відкат).</p>
+<h2>Пароль точки доступу</h2>
+<form method="post" action="/devices/{{$d.ID}}/password"><input type="hidden" name="csrf" value="{{$csrf}}">
+<button class="sec">Показати пароль</button> <span class="muted">змінено {{dtp $d.PasswordChanged}}; перегляд записується в аудит</span></form>
+</div>
+{{end}}
+</div>
+
+<h2>Жорсткі параметри (підписана конфігурація)</h2>
+<form class="card" method="post" action="/devices/{{$d.ID}}/config"><input type="hidden" name="csrf" value="{{$csrf}}">
+<table><tr><th>Модуль</th><th>Встановлено</th><th>Мін., МГц</th><th>Макс., МГц</th><th>Межі профілю</th></tr>
+{{range .Data.Profile.Modules}}{{$r := index $d.Params.Ranges .Name}}
+<tr><td>{{label .Name}}</td>
+<td><input type="checkbox" name="mod_{{.Name}}" {{if index $d.Params.Modules .Name}}checked{{end}}></td>
+<td><input type="number" name="min_{{.Name}}" value="{{$r.Min}}" min="{{.Limit.Min}}" max="{{.Limit.Max}}"></td>
+<td><input type="number" name="max_{{.Name}}" value="{{$r.Max}}" min="{{.Limit.Min}}" max="{{.Limit.Max}}"></td>
+<td class="muted">{{.Limit.Min}}–{{.Limit.Max}}</td></tr>{{end}}
+</table>
+{{if has .Actor "engineer"}}<p><button>Підписати нову версію конфігурації</button></p>{{end}}
+</form>
+
+<h2>Історія оновлень</h2>
+<div class="scroll"><table><tr><th>Час</th><th>Реліз</th><th>Ініціатор</th><th>Стан</th><th>Деталі</th></tr>
+{{range .Data.Events}}<tr><td>{{dt .At}}</td><td>{{.Release}}</td><td>{{.Initiator}}</td><td>{{.Status}}</td><td class="mono">{{.Details}}</td></tr>
+{{else}}<tr><td colspan="5" class="muted">Ще немає</td></tr>{{end}}</table></div>
+
+{{if isroot .Actor}}
+<h2>Відкликання</h2>
+<form class="card row" method="post" action="/devices/{{$d.ID}}/revoke"><input type="hidden" name="csrf" value="{{$csrf}}">
+<input type="text" name="reason" placeholder="Причина (обов'язково)" required size="40">
+{{if eq $d.Status "revoked"}}<input type="hidden" name="action" value="restore"><button>Зняти відкликання</button>
+{{else}}<input type="hidden" name="action" value="revoke"><button class="danger">Відкликати прилад</button>{{end}}
+</form>
+{{end}}
+{{end}}

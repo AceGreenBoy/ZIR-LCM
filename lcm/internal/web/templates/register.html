@@ -1,0 +1,31 @@
+{{define "content"}}
+<h1>Реєстрація приладу</h1>
+{{with .Data.Claim}}
+<div class="card"><dl>
+<dt>Код</dt><dd class="mono">{{claim .ClaimCode}}</dd><dt>MAC</dt><dd class="mono">{{.MAC}}</dd>
+<dt>Ревізія чипа</dt><dd>{{.ChipRev}}</dd><dt>Bootstrap</dt><dd>{{.BootstrapVersion}}</dd>
+<dt>Дійсний до</dt><dd>{{dt .ExpiresAt}}</dd></dl>
+{{if .ExistingDevice}}<p class="flash err">Прилад з цим MAC уже зареєстровано: <a href="/devices/{{.ExistingDevice}}">{{.ExistingSerial}}</a>{{if .ExistingRevoked}} (відкликано){{end}}.
+Якщо це той самий прилад після перепрошивки по USB, позначте «перереєструвати»: він отримає нові ключі, старі стануть недійсними.
+Якщо ні — це може бути клон.</p>{{end}}
+</div>
+{{$claim := .}}
+{{range $.Data.Profiles}}
+<form class="card" method="post" action="/register/approve"><input type="hidden" name="csrf" value="{{$.CSRF}}">
+<input type="hidden" name="request_id" value="{{$claim.RequestID}}"><input type="hidden" name="profile" value="{{.Code}}">
+<h2 style="margin-top:0">{{.Name}} <span class="tag">{{.Code}}</span></h2>
+<table><tr><th>Модуль</th><th>Встановлено</th><th>Мін., МГц</th><th>Макс., МГц</th></tr>
+{{range .Modules}}<tr><td>{{label .Name}}</td><td><input type="checkbox" name="mod_{{.Name}}" checked></td>
+<td><input type="number" name="min_{{.Name}}" value="{{.Limit.Min}}" min="{{.Limit.Min}}" max="{{.Limit.Max}}"></td>
+<td><input type="number" name="max_{{.Name}}" value="{{.Limit.Max}}" min="{{.Limit.Min}}" max="{{.Limit.Max}}"></td></tr>{{end}}
+</table>
+{{if $claim.ExistingDevice}}<div class="row"><label class="inline"><input type="checkbox" name="reregister"> Перереєструвати існуючий прилад</label></div>{{end}}
+<p><button>Зареєструвати з профілем {{.Code}}</button></p></form>
+{{else}}<p class="flash err">Немає активних профілів. Створіть профіль.</p>{{end}}
+{{else}}
+<form class="card" method="post" action="/register/claim"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<p>Введіть код з екрана приладу (bootstrap показує його після підключення до Wi-Fi).</p>
+<div class="row"><input type="text" name="code" class="big" size="10" placeholder="XXXX-XXXX" required autofocus autocomplete="off"><button>Знайти</button></div>
+</form>
+{{end}}
+{{end}}

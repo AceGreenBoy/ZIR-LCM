@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Title}} · ZIR LCM</title><link rel="stylesheet" href="/static/style.css"></head>
+<body>
+{{if .Actor.UserID}}
+<header><b>ZIR LCM</b>
+<nav>
+<a href="/devices" {{if eq .Nav "devices" "device"}}class="on"{{end}}>Прилади</a>
+{{if has .Actor "manufacturer"}}<a href="/register" {{if eq .Nav "register"}}class="on"{{end}}>Реєстрація</a>{{end}}
+<a href="/releases" {{if eq .Nav "releases"}}class="on"{{end}}>Релізи</a>
+<a href="/builds" {{if eq .Nav "builds"}}class="on"{{end}}>Збірки</a>
+<a href="/profiles" {{if eq .Nav "profiles"}}class="on"{{end}}>Профілі</a>
+{{if has .Actor "admin"}}<a href="/audit" {{if eq .Nav "audit"}}class="on"{{end}}>Аудит</a>{{end}}
+<a href="/keys" {{if eq .Nav "keys"}}class="on"{{end}}>Ключі</a>
+</nav>
+<span class="muted">{{.Actor.Login}}</span>
+<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="sec">Вийти</button></form>
+</header>
+{{end}}
+<main>
+{{if .Flash}}<div class="flash ok">{{.Flash}}</div>{{end}}
+{{if .Error}}<div class="flash err">{{.Error}}</div>{{end}}
+{{template "content" .}}
+</main>
+</body></html>

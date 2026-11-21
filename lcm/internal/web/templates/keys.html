@@ -1,0 +1,5 @@
+{{define "content"}}
+<h1>Публічні ключі сервера</h1>
+<p class="muted">Ці ключі вкомпільовано в прошивку (<code>lcmctl export-pubkeys</code> генерує <code>zir_server_keys.h</code>). Ключ fw_sign прилад бере з блоку підпису поточної прошивки.</p>
+{{range .Data}}<div class="card"><b class="mono">{{.Kid}}</b> {{if .Active}}<span class="tag ok">активний</span>{{end}}<pre class="mono">{{.PEM}}</pre></div>{{end}}
+{{end}}
