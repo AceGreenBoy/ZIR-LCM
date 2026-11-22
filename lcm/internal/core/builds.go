@@ -268,7 +268,7 @@ func (c *Core) UploadWWW(ctx context.Context, a Actor, tarData []byte) (string, 
 func (c *Core) Builds(ctx context.Context, kind string) ([]Build, error) {
 	rows, err := c.Pool.Query(ctx, `SELECT b.id, b.kind, COALESCE(p.code,''), b.version, COALESCE(b.www_api,0), COALESCE(b.size,0),
 		encode(b.sha256,'hex'), COALESCE(encode(b.comparable_hash,'hex'),''), b.created_at, COALESCE(u.login,''), b.elf_path IS NOT NULL,
-		COALESCE(b.comparable_hash = (SELECT p2.comparable_hash FROM builds p2 WHERE p2.kind='app' AND p2.profile_id=b.profile_id
+		COALESCE(b.comparable_hash = (SELECT p2.comparable_hash FROM builds p2 WHERE p2.kind=b.kind AND p2.profile_id=b.profile_id
 			AND p2.created_at < b.created_at ORDER BY p2.created_at DESC LIMIT 1), false)
 		FROM builds b LEFT JOIN hw_profiles p ON p.id=b.profile_id LEFT JOIN users u ON u.id=b.created_by
 		WHERE b.status='success' AND ($1='' OR b.kind=$1) ORDER BY b.created_at DESC LIMIT 200`, kind)

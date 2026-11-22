@@ -170,10 +170,11 @@ type candidate struct {
 }
 
 type Offer struct {
-	ReleaseID string
-	Version   string
-	Mode      string // engineer | auto | button
-	Critical  bool
+	ReleaseID  string
+	DevBuildID string // set instead of ReleaseID for a dev build
+	Version    string
+	Mode       string // engineer | auto | button
+	Critical   bool
 }
 
 // SelectUpdate is the version-choice algorithm. "current" is the version of
@@ -190,6 +191,10 @@ func (c *Core) SelectUpdate(ctx context.Context, deviceID string) (*Offer, error
 	}
 	if status == "revoked" {
 		return nil, errRevoked
+	}
+	// A developer device with an assigned dev build gets it and stays on it.
+	if offer, assigned, err := c.devOffer(ctx, deviceID); err != nil || assigned {
+		return offer, err
 	}
 	if pendingID != "" {
 		var o Offer
@@ -250,17 +255,22 @@ func (c *Core) SelectUpdate(ctx context.Context, deviceID string) (*Offer, error
 
 // Manifest is the signed update offer (ARCHITECTURE 7.3).
 type Manifest struct {
-	Typ       string       `json:"typ"`
-	DeviceID  string       `json:"device_id"`
-	Profile   string       `json:"profile"`
-	ReleaseID string       `json:"release_id"`
-	Version   string       `json:"version"`
-	Mode      string       `json:"mode"`
-	Critical  bool         `json:"critical"`
-	App       ManifestApp  `json:"app"`
-	WWW       *ManifestWWW `json:"www"`
-	IAT       int64        `json:"iat"`
-	EXP       int64        `json:"exp"`
+	Typ       string `json:"typ"`
+	DeviceID  string `json:"device_id"`
+	Profile   string `json:"profile"`
+	ReleaseID string `json:"release_id"`
+	// Dev build offer: release_id is empty, the image is unsigned
+	// (CONFIG_ZIR_DEV_BUILD) and only a device whose config has "dev": true
+	// may install it. www is not part of a dev offer.
+	DevBuildID string       `json:"dev_build_id,omitempty"`
+	Dev        bool         `json:"dev,omitempty"`
+	Version    string       `json:"version"`
+	Mode       string       `json:"mode"`
+	Critical   bool         `json:"critical"`
+	App        ManifestApp  `json:"app"`
+	WWW        *ManifestWWW `json:"www"`
+	IAT        int64        `json:"iat"`
+	EXP        int64        `json:"exp"`
 }
 
 type ManifestApp struct {
@@ -287,6 +297,7 @@ type UpdateReply struct {
 	Manifest      *string `json:"manifest"`
 	ConfigVersion int     `json:"config_version"`
 	ServerTime    int64   `json:"server_time"`
+	PollAfter     int     `json:"poll_after"` // seconds until the next check
 }
 
 func (c *Core) CheckUpdate(ctx context.Context, s DeviceSession) (UpdateReply, error) {
@@ -295,13 +306,30 @@ func (c *Core) CheckUpdate(ctx context.Context, s DeviceSession) (UpdateReply, e
 	}
 	reply := UpdateReply{ServerTime: c.Now().Unix()}
 	var appSHA, wwwSHA []byte
-	if err := c.Pool.QueryRow(ctx, `SELECT config_version, current_app_sha256, current_www_sha256 FROM devices WHERE id=$1`,
-		s.DeviceID).Scan(&reply.ConfigVersion, &appSHA, &wwwSHA); err != nil {
+	var dev bool
+	if err := c.Pool.QueryRow(ctx, `SELECT config_version, current_app_sha256, current_www_sha256, dev_mode FROM devices WHERE id=$1`,
+		s.DeviceID).Scan(&reply.ConfigVersion, &appSHA, &wwwSHA, &dev); err != nil {
 		return reply, err
+	}
+	reply.PollAfter = PollRegular
+	if dev {
+		reply.PollAfter = PollDev
 	}
 	offer, err := c.SelectUpdate(ctx, s.DeviceID)
 	if err != nil || offer == nil {
 		return reply, err
+	}
+	if offer.DevBuildID != "" {
+		m, err := c.devManifest(ctx, s, offer, appSHA)
+		if err != nil {
+			return reply, err
+		}
+		tok, err := c.Signer.SignJWS(signer.Manifest, "zir-manifest/1", m)
+		if err != nil {
+			return reply, err
+		}
+		reply.Manifest = &tok
+		return reply, nil
 	}
 	m := Manifest{Typ: "zir-manifest/1", DeviceID: s.DeviceID, Profile: s.Profile, ReleaseID: offer.ReleaseID,
 		Version: offer.Version, Mode: offer.Mode, Critical: offer.Critical, IAT: c.Now().Unix(), EXP: c.Now().Add(manifestTTL).Unix()}
@@ -393,10 +421,11 @@ func (c *Core) WWWPath(ctx context.Context, s DeviceSession, releaseID string) (
 // ── install report ──────────────────────────────────────────────────────────
 
 type UpdateReport struct {
-	ReleaseID string `json:"release_id"`
-	Status    string `json:"status"` // downloading | installed | failed | rolled_back
-	Error     string `json:"error,omitempty"`
-	Mode      string `json:"mode,omitempty"` // mode from the manifest
+	ReleaseID  string `json:"release_id"`
+	DevBuildID string `json:"dev_build_id,omitempty"` // instead of release_id, from a dev manifest
+	Status     string `json:"status"`                 // downloading | installed | failed | rolled_back
+	Error      string `json:"error,omitempty"`
+	Mode       string `json:"mode,omitempty"` // mode from the manifest
 }
 
 func (c *Core) ReportUpdate(ctx context.Context, s DeviceSession, body []byte, ip string) error {
@@ -410,6 +439,13 @@ func (c *Core) ReportUpdate(ctx context.Context, s DeviceSession, body []byte, i
 		return userErr(400, "bad_request", "bad status")
 	}
 	initiator := map[string]string{"engineer": "engineer", "auto": "critical", "button": "user"}[r.Mode]
+	if r.DevBuildID != "" {
+		var ini *string
+		if initiator != "" {
+			ini = &initiator
+		}
+		return c.reportDev(ctx, s, r, ini, ip)
+	}
 	return db.InTx(ctx, c.Pool, func(tx pgxTx) error {
 		var ok bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM releases WHERE id::text=$1)`, r.ReleaseID).Scan(&ok); err != nil {

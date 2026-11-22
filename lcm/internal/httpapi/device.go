@@ -4,7 +4,6 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -35,6 +34,7 @@ func (a *API) Routes() http.Handler {
 		r.Use(a.auth)
 		r.Get("/update", a.update)
 		r.Get("/artifacts/{release}/{kind}", a.artifact)
+		r.Get("/dev-artifacts/{build}", a.devArtifact)
 		r.Post("/update/report", a.report)
 		r.Get("/config", a.config)
 		r.Post("/web-password", a.webPassword)
@@ -186,6 +186,15 @@ func (a *API) artifact(w http.ResponseWriter, r *http.Request) {
 	default:
 		err = &core.Error{Status: 404, Code: "not_found", Msg: "unknown artifact"}
 	}
+	serveFile(w, r, path, err)
+}
+
+func (a *API) devArtifact(w http.ResponseWriter, r *http.Request) {
+	path, err := a.Core.DevImagePath(r.Context(), devSession(r), chi.URLParam(r, "build"))
+	serveFile(w, r, path, err)
+}
+
+func serveFile(w http.ResponseWriter, r *http.Request, path string, err error) {
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -234,5 +243,3 @@ func (a *API) webPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
-
-var _ = errors.New

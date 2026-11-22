@@ -26,6 +26,9 @@ const (
 	crockford         = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 	webPasswordMinLen = 8
 	webPasswordMaxLen = 63
+	// A bootstrap without approval polls and re-requests; more than this many
+	// requests from one address in an hour is refused (keeps the list clean).
+	regPerIPHour = 200
 )
 
 // RegisterRequest is the body of POST /dev/v1/register/request, signed with
@@ -106,22 +109,50 @@ func (c *Core) RequestRegistration(ctx context.Context, body []byte, method, uri
 		return RegisterReply{}, userErr(400, "bad_password", "web_password cannot be decrypted or has bad length")
 	}
 
+	ipAddr := parseIP(ip)
+	if ipAddr != nil {
+		var n int
+		if err := c.Pool.QueryRow(ctx, `SELECT count(*) FROM registration_requests WHERE ip=$1 AND created_at > $2`,
+			ipAddr, c.Now().Add(-time.Hour)).Scan(&n); err != nil {
+			return RegisterReply{}, err
+		}
+		if n >= regPerIPHour {
+			return RegisterReply{}, userErr(429, "too_many", "too many registration requests from this address, retry later")
+		}
+	}
+
 	id := uuid.NewString()
 	pwEnc, err := c.Env.Seal(pw, "reg:"+id+":web_password")
 	if err != nil {
 		return RegisterReply{}, err
 	}
 	var code string
-	for attempt := 0; ; attempt++ {
-		code = newClaimCode()
-		_, err = c.Pool.Exec(ctx, `INSERT INTO registration_requests
-			(id, claim_code, mac, chip_rev, bootstrap_version, dev_sign_pub, dev_kex_pub, web_password_enc, expires_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-			id, code, mac, req.ChipRev, req.BootstrapVersion, signPub, kexPub, pwEnc, c.Now().Add(claimTTL))
-		if err == nil || !db.IsUniqueViolation(err) || attempt > 5 {
-			break
+	err = db.InTx(ctx, c.Pool, func(tx pgxTx) error {
+		// One waiting request per MAC: a restarted bootstrap replaces its old code.
+		if _, err := tx.Exec(ctx, `UPDATE registration_requests SET status='expired' WHERE mac=$1 AND status='pending'`, mac); err != nil {
+			return err
 		}
-	}
+		for attempt := 0; ; attempt++ {
+			code = newClaimCode()
+			_, err := tx.Exec(ctx, `INSERT INTO registration_requests
+				(id, claim_code, mac, chip_rev, bootstrap_version, dev_sign_pub, dev_kex_pub, web_password_enc, expires_at, ip)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (claim_code) DO NOTHING`,
+				id, code, mac, req.ChipRev, req.BootstrapVersion, signPub, kexPub, pwEnc, c.Now().Add(claimTTL), ipAddr)
+			if err != nil {
+				return err
+			}
+			var ok bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM registration_requests WHERE id=$1)`, id).Scan(&ok); err != nil {
+				return err
+			}
+			if ok {
+				return nil
+			}
+			if attempt > 5 {
+				return fmt.Errorf("cannot pick a unique claim code")
+			}
+		}
+	})
 	if err != nil {
 		return RegisterReply{}, err
 	}
@@ -166,6 +197,46 @@ func (c *Core) RegistrationStatus(ctx context.Context, requestID, method, uri, s
 	return out, nil
 }
 
+// PendingRegistration is a device waiting in the admin UI for its code.
+// The code itself is not shown: it must be read from the device screen.
+type PendingRegistration struct {
+	RequestID        string
+	MAC              string
+	ChipRev          string
+	BootstrapVersion string
+	IP               string
+	CreatedAt        time.Time
+	ExpiresAt        time.Time
+	ExistingSerial   string // the MAC already belongs to this device
+}
+
+// PendingRegistrations lists devices that sent a registration request and wait
+// for approval, newest first.
+func (c *Core) PendingRegistrations(ctx context.Context, a Actor) ([]PendingRegistration, error) {
+	if err := a.require(RoleManufacturer); err != nil {
+		return nil, err
+	}
+	rows, err := c.Pool.Query(ctx, `SELECT r.id, r.mac, r.chip_rev, r.bootstrap_version, COALESCE(host(r.ip),''),
+		r.created_at, r.expires_at, COALESCE(d.serial,'')
+		FROM registration_requests r LEFT JOIN devices d ON d.mac=r.mac
+		WHERE r.status='pending' AND r.expires_at > $1 ORDER BY r.created_at DESC LIMIT 100`, c.Now())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PendingRegistration
+	for rows.Next() {
+		var p PendingRegistration
+		var mac net.HardwareAddr
+		if err := rows.Scan(&p.RequestID, &mac, &p.ChipRev, &p.BootstrapVersion, &p.IP, &p.CreatedAt, &p.ExpiresAt, &p.ExistingSerial); err != nil {
+			return nil, err
+		}
+		p.MAC = mac.String()
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // Claim is what the manufacturer sees after entering a code.
 type Claim struct {
 	RequestID        string
@@ -181,7 +252,10 @@ type Claim struct {
 	ExistingRevoked bool
 }
 
-func (c *Core) ClaimCode(ctx context.Context, a Actor, code string) (Claim, error) {
+// ClaimCode finds a waiting request by the code from the device screen. With
+// requestID (a device picked from the waiting list) the code must belong to
+// that very request. Wrong codes count towards the per-user limit either way.
+func (c *Core) ClaimCode(ctx context.Context, a Actor, requestID, code string) (Claim, error) {
 	if err := a.require(RoleManufacturer); err != nil {
 		return Claim{}, err
 	}
@@ -196,10 +270,13 @@ func (c *Core) ClaimCode(ctx context.Context, a Actor, code string) (Claim, erro
 	var cl Claim
 	var mac net.HardwareAddr
 	err := c.Pool.QueryRow(ctx, `SELECT id, claim_code, mac, chip_rev, bootstrap_version, created_at, expires_at
-		FROM registration_requests WHERE claim_code=$1 AND status='pending' AND expires_at > $2`,
-		NormalizeClaim(code), c.Now()).Scan(&cl.RequestID, &cl.ClaimCode, &mac, &cl.ChipRev, &cl.BootstrapVersion, &cl.CreatedAt, &cl.ExpiresAt)
+		FROM registration_requests WHERE claim_code=$1 AND status='pending' AND expires_at > $2 AND ($3='' OR id::text=$3)`,
+		NormalizeClaim(code), c.Now(), requestID).Scan(&cl.RequestID, &cl.ClaimCode, &mac, &cl.ChipRev, &cl.BootstrapVersion, &cl.CreatedAt, &cl.ExpiresAt)
 	if db.IsNoRows(err) {
 		c.Pool.Exec(ctx, `INSERT INTO claim_failures (user_id) VALUES ($1)`, a.UserID)
+		if requestID != "" {
+			return Claim{}, userErr(404, "not_found", "код не збігається з кодом на екрані цього приладу або запит прострочено")
+		}
 		return Claim{}, userErr(404, "not_found", "код не знайдено або він прострочений")
 	}
 	if err != nil {
@@ -223,6 +300,9 @@ type ApproveInput struct {
 	Profile    string
 	Params     HardParams
 	Reregister bool
+	// Dev makes a developer device: the signed config allows unsigned images
+	// (CONFIG_ZIR_DEV_BUILD) from the server. superadmin only.
+	Dev bool
 }
 
 // Approve registers the device (or re-registers an existing one with fresh
@@ -230,6 +310,9 @@ type ApproveInput struct {
 func (c *Core) Approve(ctx context.Context, a Actor, in ApproveInput) (deviceID string, err error) {
 	if err := a.require(RoleManufacturer); err != nil {
 		return "", err
+	}
+	if in.Dev && !a.Roles[RoleSuperadmin] {
+		return "", userErr(403, "forbidden", "прилад розробника може зареєструвати лише superadmin")
 	}
 	prof, schema, err := c.Profile(ctx, c.Pool, in.Profile)
 	if err != nil {
@@ -309,16 +392,18 @@ func (c *Core) Approve(ctx context.Context, a Actor, in ApproveInput) (deviceID 
 			serial = fmt.Sprintf("ZIR3M-%06d", n)
 			cfgVersion = 1
 			_, err = tx.Exec(ctx, `INSERT INTO devices (id, serial, mac, chip_rev, profile_id, dev_sign_pub, dev_kex_pub,
-				ota_key_enc, ota_pub_der, web_password_enc, web_password_changed_at, config_version, registered_by)
-				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11,$12)`,
-				deviceID, serial, mac.String(), chipRev, prof.ID, signPub, kexPub, otaEnc, otaPubDER, pwEnc, cfgVersion, a.UserID)
+				ota_key_enc, ota_pub_der, web_password_enc, web_password_changed_at, config_version, registered_by, dev_mode)
+				VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11,$12,$13)`,
+				deviceID, serial, mac.String(), chipRev, prof.ID, signPub, kexPub, otaEnc, otaPubDER, pwEnc, cfgVersion, a.UserID, in.Dev)
 		} else {
+			// Re-registration keeps the dev flag only if asked again.
 			err = tx.QueryRow(ctx, `UPDATE devices SET chip_rev=$2, profile_id=$3, dev_sign_pub=$4, dev_kex_pub=$5,
 				ota_key_enc=$6, ota_pub_der=$7, web_password_enc=$8, web_password_changed_at=now(),
 				config_version=config_version+1, current_app_sha256=NULL, current_www_sha256=NULL,
-				registered_by=$9, registered_at=now()
+				registered_by=$9, registered_at=now(), dev_mode=$10,
+				dev_build_id=CASE WHEN $10 THEN dev_build_id END, dev_critical=$10 AND dev_critical
 				WHERE id=$1 RETURNING serial, config_version`,
-				deviceID, chipRev, prof.ID, signPub, kexPub, otaEnc, otaPubDER, pwEnc, a.UserID).Scan(&serial, &cfgVersion)
+				deviceID, chipRev, prof.ID, signPub, kexPub, otaEnc, otaPubDER, pwEnc, a.UserID, in.Dev).Scan(&serial, &cfgVersion)
 			if err == nil {
 				// Old keys are void: drop sessions and the encrypted image cache.
 				_, err = tx.Exec(ctx, `DELETE FROM device_sessions WHERE device_id=$1`, deviceID)
@@ -328,7 +413,7 @@ func (c *Core) Approve(ctx context.Context, a Actor, in ApproveInput) (deviceID 
 		if err != nil {
 			return err
 		}
-		cfg, err := c.signConfig(ctx, tx, deviceID, mac.String(), prof.Code, cfgVersion, in.Params, a.UserID)
+		cfg, err := c.signConfig(ctx, tx, deviceID, mac.String(), prof.Code, cfgVersion, in.Params, in.Dev, a.UserID)
 		if err != nil {
 			return err
 		}
@@ -346,7 +431,7 @@ func (c *Core) Approve(ctx context.Context, a Actor, in ApproveInput) (deviceID 
 			return err
 		}
 		return a.audit(ctx, tx, action, "device", deviceID, map[string]any{
-			"serial": serial, "mac": mac.String(), "profile": prof.Code, "params": in.Params, "request_id": in.RequestID})
+			"serial": serial, "mac": mac.String(), "profile": prof.Code, "params": in.Params, "request_id": in.RequestID, "dev": in.Dev})
 	})
 	return deviceID, err
 }
@@ -361,11 +446,14 @@ type ConfigPayload struct {
 	IAT      int64            `json:"iat"`
 	Modules  map[string]bool  `json:"modules"`
 	Ranges   map[string]Range `json:"ranges"`
+	// Dev: developer device. The device may install unsigned images (built
+	// with CONFIG_ZIR_DEV_BUILD) that the server offers with "dev": true.
+	Dev bool `json:"dev,omitempty"`
 }
 
-func (c *Core) signConfig(ctx context.Context, tx pgxTx, deviceID, mac, profile string, version int, p HardParams, by string) (string, error) {
+func (c *Core) signConfig(ctx context.Context, tx pgxTx, deviceID, mac, profile string, version int, p HardParams, dev bool, by string) (string, error) {
 	payload := ConfigPayload{Typ: "zir-config/1", DeviceID: deviceID, MAC: mac, Profile: profile,
-		Version: version, IAT: c.Now().Unix(), Modules: p.Modules, Ranges: p.Ranges}
+		Version: version, IAT: c.Now().Unix(), Modules: p.Modules, Ranges: p.Ranges, Dev: dev}
 	tok, err := c.Signer.SignJWS(signer.Config, "zir-config/1", payload)
 	if err != nil {
 		return "", err

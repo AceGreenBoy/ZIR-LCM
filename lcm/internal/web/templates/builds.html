@@ -19,7 +19,8 @@
 <div class="scroll"><table><tr><th>Час</th><th>Тип</th><th>Профіль</th><th>Версія</th><th>www_api</th><th>Розмір</th><th>SHA-256</th><th>Файли</th></tr>
 {{range .Data.List}}<tr><td>{{dt .CreatedAt}}<div class="muted">{{.CreatedBy}}</div></td><td>{{.Kind}}</td><td>{{.Profile}}</td><td>{{.Version}}</td><td>{{.WwwAPI}}</td><td>{{kb .Size}}</td>
 <td class="mono">{{short .SHA256}}{{if .Unchanged}}<br><span class="tag">код не змінився</span>{{end}}</td>
-<td>{{if eq .Kind "app"}}<a href="/builds/{{.ID}}/app.bin">app.bin (підписаний)</a>{{if .HasELF}}<br><a href="/builds/{{.ID}}/app.elf">app.elf</a>{{end}}
+<td>{{if eq .Kind "dev_app"}}<a href="/builds/{{.ID}}/app.bin">app.bin (без підпису)</a> · <a href="/dev?build={{.ID}}">призначити</a>{{if .HasELF}}<br><a href="/builds/{{.ID}}/app.elf">app.elf</a>{{end}}
+{{else if eq .Kind "app"}}<a href="/builds/{{.ID}}/app.bin">app.bin (підписаний)</a>{{if .HasELF}}<br><a href="/builds/{{.ID}}/app.elf">app.elf</a>{{end}}
 {{else}}<a href="/builds/{{.ID}}/www.zwww">.zwww</a><br><a href="/builds/{{.ID}}/www.tar">www.tar</a>{{end}}</td></tr>
 {{else}}<tr><td colspan="8" class="muted">Збірок ще немає</td></tr>{{end}}</table></div>
 <p class="muted">Підписаний app.bin можна прошити по USB (<code>esptool.py write_flash 0x10000 app.bin</code>), щоб повернути прилад зі збірки для розробки в цикл OTA.</p>

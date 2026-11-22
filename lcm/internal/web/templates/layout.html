@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+{{if .Refresh}}<meta http-equiv="refresh" content="{{.Refresh}}">{{end}}
 <title>{{.Title}} · ZIR LCM</title><link rel="stylesheet" href="/static/style.css"></head>
 <body>
 {{if .Actor.UserID}}
@@ -11,6 +12,7 @@
 <a href="/builds" {{if eq .Nav "builds"}}class="on"{{end}}>Збірки</a>
 <a href="/profiles" {{if eq .Nav "profiles"}}class="on"{{end}}>Профілі</a>
 {{if has .Actor "admin"}}<a href="/audit" {{if eq .Nav "audit"}}class="on"{{end}}>Аудит</a>{{end}}
+{{if isroot .Actor}}<a href="/dev" {{if eq .Nav "dev"}}class="on"{{end}}>Розробка</a>{{end}}
 <a href="/keys" {{if eq .Nav "keys"}}class="on"{{end}}>Ключі</a>
 </nav>
 <span class="muted">{{.Actor.Login}}</span>

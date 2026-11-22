@@ -45,7 +45,29 @@ bin/devicesim -server http://localhost:8090 -state dev1.json register   # пок
 bin/devicesim -server http://localhost:8090 -state dev1.json update     # перевірка й встановлення
 bin/devicesim -server http://localhost:8090 -state dev1.json password нов-пароль-1
 bin/devicesim -profile zir3m-full fake-app 1.0.0 app.bin                # фейковий образ для завантаження
+bin/devicesim -dev fake-app main-test dev.bin                           # фейкова збірка для розробки
+bin/devicesim -server http://localhost:8090 -state dev1.json watch      # прилад, що працює: перевірка кожні poll_after с
 ```
+
+Прилад, що чекає реєстрації, з'являється в адмінці на вкладці «Реєстрація». «Додати» → код з виводу
+`register` → профіль. Позначка «Прилад розробника» (лише superadmin) дозволяє йому збірки для розробки.
+
+### Збірки для розробки
+
+Адмінка → «Розробка»: завантажити `firmware.bin` з `esp32dev` (`CONFIG_ZIR_DEV_BUILD=y`), відмітити
+прилади розробника, за потреби «Критична» (ставиться протягом ~30 с, без кнопки й без перевірки заряду).
+З терміналу — токеном API (створюється там само, показується один раз):
+
+```sh
+export LCM_URL=http://localhost:8090 LCM_TOKEN=zirlcm_...
+bin/lcmctl push-dev -devices ZIR3M-000001,ZIR3M-000002 -critical .pio/build/esp32dev/firmware.bin
+bin/lcmctl push-dev -devices all firmware.bin    # усім приладам розробника профілю збірки
+bin/lcmctl dev-devices                           # що на яких приладах
+```
+
+Клієнт прошивки (`ZIR_3M/components/lcm_client`) перевіряється проти цього сервера:
+`ZIR_3M/test/lcm_host/run.sh` (вектори — `go run ./cmd/fwvectors`, протокол — `TestFirmwareClient`).
+`lcmctl export-pubkeys` кладе в `zir_server_keys.h` і ключі підпису прошивок (`ZIR_KEYS_FWSIGN`) для bootstrap.
 
 ## Робота з прошивкою
 

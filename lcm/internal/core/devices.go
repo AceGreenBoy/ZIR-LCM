@@ -144,6 +144,14 @@ func (c *Core) Session(ctx context.Context, body []byte, method, uri, sig, ip st
 	return SessionReply{SessionToken: b64.EncodeToString(token), ExpiresIn: int(sessionTTL.Seconds()), ServerTime: c.Now().Unix()}, nil
 }
 
+func parseIP(s string) *netip.Addr {
+	a, err := netip.ParseAddr(s)
+	if err != nil {
+		return nil
+	}
+	return &a
+}
+
 func nilIfEmpty(b []byte) []byte {
 	if len(b) == 0 {
 		return nil
@@ -211,8 +219,9 @@ func (c *Core) UpdateConfig(ctx context.Context, a Actor, deviceID string, p Har
 		var profileCode string
 		var version int
 		var status string
-		err := tx.QueryRow(ctx, `SELECT d.mac, p.code, d.config_version, d.status FROM devices d JOIN hw_profiles p ON p.id=d.profile_id
-			WHERE d.id::text=$1 FOR UPDATE OF d`, deviceID).Scan(&mac, &profileCode, &version, &status)
+		var dev bool
+		err := tx.QueryRow(ctx, `SELECT d.mac, p.code, d.config_version, d.status, d.dev_mode FROM devices d JOIN hw_profiles p ON p.id=d.profile_id
+			WHERE d.id::text=$1 FOR UPDATE OF d`, deviceID).Scan(&mac, &profileCode, &version, &status, &dev)
 		if err != nil {
 			return err
 		}
@@ -227,7 +236,7 @@ func (c *Core) UpdateConfig(ctx context.Context, a Actor, deviceID string, p Har
 			return err
 		}
 		version++
-		if _, err := c.signConfig(ctx, tx, deviceID, mac.String(), profileCode, version, p, a.UserID); err != nil {
+		if _, err := c.signConfig(ctx, tx, deviceID, mac.String(), profileCode, version, p, dev, a.UserID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE devices SET config_version=$2 WHERE id::text=$1`, deviceID, version); err != nil {
@@ -253,13 +262,23 @@ type Device struct {
 	LastIP                                               string
 	RevokeReason                                         string
 	PasswordChanged                                      *time.Time
+	// Developer device and the dev build assigned to it.
+	DevMode       bool
+	DevBuildID    string
+	DevBuild      string // version of the assigned dev build
+	DevCritical   bool
+	DevInstalled  bool // the device reports the assigned dev build's hash
+	DevAssignedAt *time.Time
 }
 
 const deviceSelect = `SELECT d.id, d.serial, d.mac, d.chip_rev, p.code, p.id, d.status, d.is_test, d.pinned,
 	COALESCE(d.current_version,''), COALESCE(cr.version,''), COALESCE(pr.version,''), COALESCE(d.pending_release_id::text,''),
 	d.config_version, COALESCE(c.hard_params,'{}'), d.registered_at, COALESCE(u.login,''), d.last_seen_at,
-	COALESCE(host(d.last_ip),''), COALESCE(d.revoke_reason,''), d.web_password_changed_at
+	COALESCE(host(d.last_ip),''), COALESCE(d.revoke_reason,''), d.web_password_changed_at,
+	d.dev_mode, COALESCE(d.dev_build_id::text,''), COALESCE(dvb.version,''), d.dev_critical,
+	COALESCE(dvb.sha256 = d.current_app_sha256, false), d.dev_assigned_at
 	FROM devices d JOIN hw_profiles p ON p.id=d.profile_id
+	LEFT JOIN builds dvb ON dvb.id=d.dev_build_id
 	LEFT JOIN releases cr ON cr.id=d.current_release_id
 	LEFT JOIN releases pr ON pr.id=d.pending_release_id
 	LEFT JOIN users u ON u.id=d.registered_by
@@ -271,7 +290,8 @@ func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var params []byte
 	err := row.Scan(&d.ID, &d.Serial, &mac, &d.ChipRev, &d.Profile, &d.ProfileID, &d.Status, &d.IsTest, &d.Pinned,
 		&d.CurrentVersion, &d.CurrentRelease, &d.PendingRelease, &d.PendingReleaseID,
-		&d.ConfigVersion, &params, &d.RegisteredAt, &d.RegisteredBy, &d.LastSeen, &d.LastIP, &d.RevokeReason, &d.PasswordChanged)
+		&d.ConfigVersion, &params, &d.RegisteredAt, &d.RegisteredBy, &d.LastSeen, &d.LastIP, &d.RevokeReason, &d.PasswordChanged,
+		&d.DevMode, &d.DevBuildID, &d.DevBuild, &d.DevCritical, &d.DevInstalled, &d.DevAssignedAt)
 	d.MAC = mac.String()
 	json.Unmarshal(params, &d.Params)
 	return d, err
@@ -317,8 +337,10 @@ type UpdateEvent struct {
 }
 
 func (c *Core) UpdateEvents(ctx context.Context, deviceID string) ([]UpdateEvent, error) {
-	rows, err := c.Pool.Query(ctx, `SELECT e.at, COALESCE(r.version,''), COALESCE(e.initiator,''), e.status, COALESCE(e.details::text,'')
-		FROM update_events e LEFT JOIN releases r ON r.id=e.release_id WHERE e.device_id::text=$1 ORDER BY e.at DESC LIMIT 100`, deviceID)
+	rows, err := c.Pool.Query(ctx, `SELECT e.at, COALESCE(r.version, 'dev ' || b.version, ''), COALESCE(e.initiator,''), e.status,
+		COALESCE(e.details::text,'')
+		FROM update_events e LEFT JOIN releases r ON r.id=e.release_id LEFT JOIN builds b ON b.id=e.build_id
+		WHERE e.device_id::text=$1 ORDER BY e.at DESC LIMIT 100`, deviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +387,10 @@ func (c *Core) AssignRelease(ctx context.Context, a Actor, deviceID, releaseID s
 			}
 			rel = &releaseID
 		}
-		if _, err := tx.Exec(ctx, `UPDATE devices SET pending_release_id=$2 WHERE id::text=$1`, deviceID, rel); err != nil {
+		// A release assignment replaces a dev build assignment.
+		if _, err := tx.Exec(ctx, `UPDATE devices SET pending_release_id=$2,
+			dev_build_id=CASE WHEN $2::uuid IS NULL THEN dev_build_id END,
+			dev_critical=CASE WHEN $2::uuid IS NULL THEN dev_critical ELSE false END WHERE id::text=$1`, deviceID, rel); err != nil {
 			return err
 		}
 		return a.audit(ctx, tx, "device.install", "device", deviceID, map[string]any{"release_id": releaseID})

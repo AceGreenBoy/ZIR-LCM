@@ -1,5 +1,5 @@
 {{define "content"}}{{$d := .Data.D}}{{$csrf := .CSRF}}
-<h1>{{$d.Serial}} {{if eq $d.Status "revoked"}}<span class="tag bad">відкликано</span>{{end}}</h1>
+<h1>{{$d.Serial}} {{if eq $d.Status "revoked"}}<span class="tag bad">відкликано</span>{{end}}{{if $d.DevMode}} <span class="tag warn">прилад розробника</span>{{end}}</h1>
 <div class="grid">
 <div class="card"><dl>
 <dt>MAC</dt><dd class="mono">{{$d.MAC}}</dd>
@@ -8,7 +8,9 @@
 <dt>Прошивка</dt><dd>{{or $d.CurrentVersion "—"}}</dd>
 <dt>Реліз</dt><dd>{{or $d.CurrentRelease "—"}}</dd>
 <dt>Призначено</dt><dd>{{or $d.PendingRelease "—"}}</dd>
-<dt>Пропозиція зараз</dt><dd>{{with .Data.Offer}}{{.Version}} ({{.Mode}}){{else}}—{{end}}</dd>
+<dt>Пропозиція зараз</dt><dd>{{with .Data.Offer}}{{if .DevBuildID}}dev {{end}}{{.Version}} ({{.Mode}}){{else}}—{{end}}</dd>
+{{if $d.DevMode}}<dt>Збірка розробника</dt><dd>{{if $d.DevBuildID}}{{$d.DevBuild}}{{if $d.DevCritical}} <span class="tag warn">критична</span>{{end}}
+{{if $d.DevInstalled}}<span class="tag ok">встановлено</span>{{else}}<span class="tag">очікує</span>{{end}} · {{dtp $d.DevAssignedAt}}{{else}}—{{end}}</dd>{{end}}
 <dt>Конфігурація</dt><dd>v{{$d.ConfigVersion}}</dd>
 <dt>Зареєстровано</dt><dd>{{dt $d.RegisteredAt}} · {{$d.RegisteredBy}}</dd>
 <dt>Остання зв'язок</dt><dd>{{dtp $d.LastSeen}} {{$d.LastIP}}</dd>
@@ -53,6 +55,23 @@
 {{else}}<tr><td colspan="5" class="muted">Ще немає</td></tr>{{end}}</table></div>
 
 {{if isroot .Actor}}
+<h2>Прилад розробника</h2>
+<div class="card">
+{{if $d.DevMode}}
+<form class="row" method="post" action="/devices/{{$d.ID}}/dev-build"><input type="hidden" name="csrf" value="{{$csrf}}">
+<select name="build_id"><option value="">— зняти збірку розробника —</option>
+{{range .Data.DevBuilds}}<option value="{{.ID}}" {{if eq .ID $d.DevBuildID}}selected{{end}}>{{.Version}} · {{dt .CreatedAt}} · {{short .SHA256}}</option>{{end}}</select>
+<label class="inline"><input type="checkbox" name="critical" {{if $d.DevCritical}}checked{{end}}> Критична (ставиться одразу, без кнопки і без перевірки заряду)</label>
+<button>Призначити</button></form>
+<p class="muted">Прилад розробника перевіряє оновлення кожні 30 с. Поки збірку призначено, релізи йому не пропонуються. Більше збірок і кілька приладів одразу — на сторінці <a href="/dev">Розробка</a>.</p>
+<form method="post" action="/devices/{{$d.ID}}/dev"><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="dev" value="0">
+<button class="sec">Зробити звичайним приладом</button> <span class="muted">буде підписано нову конфігурацію без ознаки; збірку розробника знято</span></form>
+{{else}}
+<form method="post" action="/devices/{{$d.ID}}/dev"><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="dev" value="1">
+<p class="muted">Прилад розробника приймає від сервера збірки для розробки без підпису. Ознака входить у підписану конфігурацію і записується в аудит.</p>
+<button class="sec">Зробити приладом розробника</button></form>
+{{end}}
+</div>
 <h2>Відкликання</h2>
 <form class="card row" method="post" action="/devices/{{$d.ID}}/revoke"><input type="hidden" name="csrf" value="{{$csrf}}">
 <input type="text" name="reason" placeholder="Причина (обов'язково)" required size="40">

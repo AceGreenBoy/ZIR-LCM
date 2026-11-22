@@ -23,7 +23,7 @@ services:
       - traefik.http.routers.lcm-limited.rule=Host(`${LCM_DOMAIN}`) && (Path(`/login`) || PathPrefix(`/login/`) || PathPrefix(`/dev/v1/register/`) || PathPrefix(`/dev/v1/auth/`))
       - traefik.http.routers.lcm-limited.entrypoints=websecure
       - traefik.http.routers.lcm-limited.tls.certresolver=letsencrypt
-      - traefik.http.routers.lcm-limited.middlewares.lcm-ratelimit
+      - traefik.http.routers.lcm-limited.middlewares=lcm-ratelimit
       - traefik.http.routers.lcm-limited.service=lcm
       - traefik.http.middlewares.lcm-ratelimit.ratelimit.average=10
       - traefik.http.middlewares.lcm-ratelimit.ratelimit.burst=20

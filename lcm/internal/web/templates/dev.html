@@ -1,0 +1,52 @@
+{{define "content"}}{{$csrf := .CSRF}}{{$sel := .Data.Build}}
+<h1>Розробка</h1>
+<p class="muted">Збірки для розробки (<code>CONFIG_ZIR_DEV_BUILD=y</code>, PlatformIO <code>esp32dev</code>) сервер не підписує, лише шифрує
+ключем K_ota конкретного приладу. Отримують їх тільки прилади розробника. Такий прилад перевіряє оновлення кожні 30 с.</p>
+
+{{with .Data.NewToken}}
+<div class="flash ok">Токен створено. Скопіюйте його зараз: більше він не показується.<br>
+<code class="mono">{{.}}</code><br>
+<span class="muted">export LCM_URL={{$.Public}} LCM_TOKEN={{.}}</span></div>
+{{end}}
+
+<div class="grid">
+<form class="card" method="post" action="/dev/builds" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{$csrf}}">
+<h2 style="margin-top:0">Завантажити збірку</h2>
+<p class="muted"><code>.pio/build/esp32dev/firmware.bin</code>. Сервер перевірить <code>zir_custom_desc_t</code>: ознака dev-збірки обов'язкова, профіль має існувати.</p>
+<div class="row">Образ: <input type="file" name="app" accept=".bin" required></div>
+<div class="row">ELF: <input type="file" name="elf" accept=".elf"></div>
+<button>Завантажити</button></form>
+
+<form class="card" method="post" action="/dev/assign"><input type="hidden" name="csrf" value="{{$csrf}}">
+<h2 style="margin-top:0">Призначити збірку</h2>
+<div class="row"><select name="build_id" required><option value="">— збірка —</option>
+{{range .Data.Builds}}<option value="{{.ID}}" {{if eq .ID $sel}}selected{{end}}>{{.Version}} · {{.Profile}} · {{dt .CreatedAt}} · {{short .SHA256}}</option>{{end}}</select></div>
+<table><tr><th></th><th>Прилад</th><th>Профіль</th><th>Прошивка</th><th>Збірка розробника</th><th>Зв'язок</th></tr>
+{{range .Data.Devices}}<tr><td><input type="checkbox" name="device" value="{{.ID}}" {{if ne .Status "active"}}disabled{{end}}></td>
+<td><a href="/devices/{{.ID}}">{{.Serial}}</a>{{if ne .Status "active"}} <span class="tag bad">відкликано</span>{{end}}</td>
+<td>{{.Profile}}</td><td>{{or .CurrentVersion "—"}}</td>
+<td>{{if .DevBuildID}}{{.DevBuild}}{{if .DevCritical}} <span class="tag warn">критична</span>{{end}}
+{{if .DevInstalled}}<span class="tag ok">встановлено</span>{{else}}<span class="tag">очікує</span>{{end}}{{else}}—{{end}}</td>
+<td>{{dtp .LastSeen}}</td></tr>
+{{else}}<tr><td colspan="6" class="muted">Немає приладів розробника. Позначте прилад при реєстрації або на його сторінці.</td></tr>{{end}}
+</table>
+<div class="row"><label class="inline"><input type="checkbox" name="critical"> Критична: ставиться одразу, без кнопки і без перевірки заряду</label></div>
+<button>Призначити</button></form>
+</div>
+
+<h2>Збірки розробника</h2>
+<div class="scroll"><table><tr><th>Час</th><th>Профіль</th><th>Версія</th><th>Розмір</th><th>SHA-256</th><th>Файли</th></tr>
+{{range .Data.Builds}}<tr><td>{{dt .CreatedAt}}<div class="muted">{{.CreatedBy}}</div></td><td>{{.Profile}}</td><td>{{.Version}}</td><td>{{kb .Size}}</td>
+<td class="mono">{{short .SHA256}}{{if .Unchanged}}<br><span class="tag">код не змінився</span>{{end}}</td>
+<td><a href="/builds/{{.ID}}/app.bin">app.bin</a>{{if .HasELF}} · <a href="/builds/{{.ID}}/app.elf">app.elf</a>{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="muted">Ще немає</td></tr>{{end}}</table></div>
+
+<h2>Токени API</h2>
+<p class="muted">Для <code>lcmctl push-dev</code> і цілі PlatformIO. Токен діє від імені власника з його поточними ролями, лише для збірок розробника, 90 днів.</p>
+<form class="card row" method="post" action="/dev/tokens"><input type="hidden" name="csrf" value="{{$csrf}}">
+<input type="text" name="name" placeholder="Назва, наприклад «ноутбук»" required size="30"><button>Створити токен</button></form>
+<div class="scroll"><table><tr><th>Назва</th><th>Власник</th><th>Створено</th><th>Діє до</th><th>Використано</th><th></th></tr>
+{{range .Data.Tokens}}<tr><td>{{.Name}}</td><td>{{.Login}}</td><td>{{dt .CreatedAt}}</td><td>{{dt .ExpiresAt}}</td><td>{{dtp .LastUsed}} {{.LastIP}}</td>
+<td>{{if .Revoked}}<span class="tag bad">відкликано</span>{{else}}<form method="post" action="/dev/tokens/{{.ID}}/revoke"><input type="hidden" name="csrf" value="{{$csrf}}"><button class="sec">Відкликати</button></form>{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="muted">Немає токенів</td></tr>{{end}}</table></div>
+{{end}}

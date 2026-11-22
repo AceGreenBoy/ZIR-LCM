@@ -82,6 +82,7 @@ func setup(t *testing.T) *env {
 
 	r := chi.NewRouter()
 	r.Mount("/dev/v1", (&httpapi.API{Core: c}).Routes())
+	r.Mount("/api/v1", (&httpapi.AdminAPI{Core: c}).Routes())
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
 
@@ -140,7 +141,7 @@ func (e *env) registerDevice(mac string) *devicesim.Device {
 	if st != "pending" {
 		e.t.Fatalf("status %s", st)
 	}
-	cl, err := e.core.ClaimCode(e.ctx, e.maker, strings.ToLower(core.FormatClaim(code)))
+	cl, err := e.core.ClaimCode(e.ctx, e.maker, "", strings.ToLower(core.FormatClaim(code)))
 	e.must(err)
 	_, err = e.core.Approve(e.ctx, e.maker, core.ApproveInput{RequestID: cl.RequestID, Profile: "zir3m-full",
 		Params: core.DefaultParams(core.DefaultModules())})
@@ -203,9 +204,9 @@ func TestFullCycle(t *testing.T) {
 	e.wantCode(ghost.Auth(ctx), "unknown_device")
 
 	// Only manufacturers approve; wrong codes are counted.
-	_, err = e.core.ClaimCode(ctx, e.eng, "AAAA-AAAA")
+	_, err = e.core.ClaimCode(ctx, e.eng, "", "AAAA-AAAA")
 	e.wantCode(err, "forbidden")
-	_, err = e.core.ClaimCode(ctx, e.maker, "ZZZZ-ZZZZ")
+	_, err = e.core.ClaimCode(ctx, e.maker, "", "ZZZZ-ZZZZ")
 	e.wantCode(err, "not_found")
 
 	d1 := e.registerDevice("28:05:A5:2C:CA:30")
@@ -381,7 +382,7 @@ func TestFullCycle(t *testing.T) {
 	d1b, _ := devicesim.New(e.srv.URL, e.keys, d1.State.MAC, "zir3m-full")
 	code, err := d1b.Register(ctx)
 	e.must(err)
-	cl, err := e.core.ClaimCode(ctx, e.maker, code)
+	cl, err := e.core.ClaimCode(ctx, e.maker, "", code)
 	e.must(err)
 	if cl.ExistingDevice != d1.State.DeviceID {
 		t.Fatal("duplicate MAC not detected")

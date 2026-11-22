@@ -109,6 +109,8 @@ func (h *Handler) Routes() http.Handler {
 		r.Post("/devices/{id}/install", h.deviceInstall)
 		r.Post("/devices/{id}/revoke", h.deviceRevoke)
 		r.Post("/devices/{id}/password", h.devicePassword)
+		r.Post("/devices/{id}/dev", h.deviceDevMode)
+		r.Post("/devices/{id}/dev-build", h.deviceDevBuild)
 		r.Get("/register", h.register)
 		r.Post("/register/claim", h.registerClaim)
 		r.Post("/register/approve", h.registerApprove)
@@ -124,6 +126,11 @@ func (h *Handler) Routes() http.Handler {
 		r.Post("/releases/{id}/critical", h.releaseCritical)
 		r.Get("/audit", h.auditPage)
 		r.Get("/keys", h.keysPage)
+		r.Get("/dev", h.devPage)
+		r.Post("/dev/builds", h.devUpload)
+		r.Post("/dev/assign", h.devAssign)
+		r.Post("/dev/tokens", h.devTokenCreate)
+		r.Post("/dev/tokens/{id}/revoke", h.devTokenRevoke)
 	})
 	return r
 }
@@ -148,10 +155,16 @@ type page struct {
 	Error  string
 	Data   any
 	Public string
+	// Refresh reloads the page every N seconds (the admin UI has no JS).
+	Refresh int
 }
 
 func (h *Handler) render(w http.ResponseWriter, r *http.Request, name, title string, data any) {
-	p := page{Title: title, Nav: name, Data: data, Public: h.PublicURL}
+	h.renderPage(w, r, page{Title: title, Nav: name, Data: data}, name)
+}
+
+func (h *Handler) renderPage(w http.ResponseWriter, r *http.Request, p page, name string) {
+	p.Public = h.PublicURL
 	if s, ok := r.Context().Value(sessKey{}).(*session); ok {
 		p.Actor, p.CSRF = s.actor, s.csrf
 	}
@@ -359,8 +372,17 @@ func (h *Handler) device(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	offer, _ := h.Core.SelectUpdate(r.Context(), d.ID)
+	var devBuilds []core.Build
+	if d.DevMode {
+		all, _ := h.Core.Builds(r.Context(), "dev_app")
+		for _, b := range all {
+			if b.Profile == d.Profile {
+				devBuilds = append(devBuilds, b)
+			}
+		}
+	}
 	h.render(w, r, "device", d.Serial, map[string]any{"D": d, "Profile": prof, "Events": events,
-		"Releases": forProfile, "Offer": offer, "Password": r.URL.Query().Get("pw") == "1"})
+		"Releases": forProfile, "Offer": offer, "DevBuilds": devBuilds, "Password": r.URL.Query().Get("pw") == "1"})
 }
 
 func paramsFromForm(r *http.Request, mods []core.ProfileModule) core.HardParams {
@@ -419,19 +441,31 @@ func (h *Handler) devicePassword(w http.ResponseWriter, r *http.Request) {
 
 // ── registration ────────────────────────────────────────────────────────────
 
+// register lists the devices waiting for approval; the page reloads itself
+// so a freshly connected bootstrap shows up without a click.
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
-	profiles, err := h.Core.Profiles(r.Context())
+	pending, err := h.Core.PendingRegistrations(r.Context(), actor(r))
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	h.render(w, r, "register", "Реєстрація приладу", map[string]any{"Profiles": profiles})
+	data := map[string]any{"Pending": pending, "Pick": r.URL.Query().Get("pick")}
+	p := page{Title: "Реєстрація приладу", Nav: "register", Data: data}
+	if data["Pick"] == "" {
+		p.Refresh = 10
+	}
+	h.renderPage(w, r, p, "register")
 }
 
 func (h *Handler) registerClaim(w http.ResponseWriter, r *http.Request) {
-	cl, err := h.Core.ClaimCode(r.Context(), actor(r), r.FormValue("code"))
+	reqID := r.FormValue("request_id")
+	cl, err := h.Core.ClaimCode(r.Context(), actor(r), reqID, r.FormValue("code"))
 	if err != nil {
-		back(w, r, "/register", err, "")
+		to := "/register"
+		if reqID != "" {
+			to += "?pick=" + urlq(reqID)
+		}
+		back(w, r, to, err, "")
 		return
 	}
 	profiles, _ := h.Core.Profiles(r.Context())
@@ -453,6 +487,7 @@ func (h *Handler) registerApprove(w http.ResponseWriter, r *http.Request) {
 	id, err := h.Core.Approve(r.Context(), actor(r), core.ApproveInput{
 		RequestID: r.FormValue("request_id"), Profile: prof.Code,
 		Params: paramsFromForm(r, prof.Modules), Reregister: r.FormValue("reregister") == "on",
+		Dev: r.FormValue("dev") == "on",
 	})
 	if err != nil {
 		back(w, r, "/register", err, "")

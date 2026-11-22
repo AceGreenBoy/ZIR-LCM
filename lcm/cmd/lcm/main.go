@@ -70,6 +70,7 @@ func run() error {
 		w.Write([]byte("ok"))
 	})
 	r.Mount("/dev/v1", (&httpapi.API{Core: c}).Routes())
+	r.Mount("/api/v1", (&httpapi.AdminAPI{Core: c}).Routes())
 	r.Mount("/", web.New(c, cfg.InsecureCookie, cfg.PublicURL).Routes())
 
 	srv := &http.Server{Addr: cfg.Listen, Handler: r, ReadHeaderTimeout: 10 * time.Second,

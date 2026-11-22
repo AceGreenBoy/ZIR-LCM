@@ -106,6 +106,9 @@ type State struct {
 	AppSHA256   string `json:"app_sha256,omitempty"`
 	WWWSHA256   string `json:"www_sha256,omitempty"`
 	ReleaseID   string `json:"release_id,omitempty"`
+	DevBuildID  string `json:"dev_build_id,omitempty"` // installed dev build
+	Dev         bool   `json:"dev,omitempty"`          // signed config says "developer device"
+	PollAfter   int    `json:"poll_after,omitempty"`   // from the last update check
 }
 
 type Device struct {
@@ -265,6 +268,7 @@ func (d *Device) PollRegistration(ctx context.Context) (status string, err error
 		return "", fmt.Errorf("decrypt ota_key: %w", err)
 	}
 	d.State.DeviceID, d.State.Serial, d.State.Config, d.State.ConfigVer, d.State.OTAKeyPEM = st.DeviceID, st.Serial, st.Config, cfg.Version, otaPEM
+	d.State.Dev = cfg.Dev
 	d.State.RequestID, d.State.ClaimCode = "", ""
 	return "approved", nil
 }
@@ -310,6 +314,7 @@ func (d *Device) CheckUpdate(ctx context.Context) (*core.Manifest, error) {
 		}
 		return nil, err
 	}
+	d.State.PollAfter = rep.PollAfter
 	if rep.ConfigVersion > d.State.ConfigVer {
 		if err := d.FetchConfig(ctx); err != nil {
 			return nil, err
@@ -328,6 +333,14 @@ func (d *Device) CheckUpdate(ctx context.Context) (*core.Manifest, error) {
 	if d.Now().Unix() > m.EXP {
 		return nil, errors.New("manifest expired")
 	}
+	// An unsigned dev image is acceptable only on a developer device, and the
+	// flag must come from the signed config, not from the manifest alone.
+	if m.Dev && !d.State.Dev {
+		return nil, errors.New("dev build offered, but the config does not allow it")
+	}
+	if m.Dev != (m.DevBuildID != "") || (m.Dev && m.ReleaseID != "") {
+		return nil, errors.New("inconsistent dev manifest")
+	}
 	return &m, nil
 }
 
@@ -343,14 +356,15 @@ func (d *Device) FetchConfig(ctx context.Context) error {
 	if cfg.Version <= d.State.ConfigVer {
 		return fmt.Errorf("config version %d not newer than %d", cfg.Version, d.State.ConfigVer)
 	}
-	d.State.Config, d.State.ConfigVer = r.Config, cfg.Version
+	d.State.Config, d.State.ConfigVer, d.State.Dev = r.Config, cfg.Version, cfg.Dev
 	return nil
 }
 
 // Install follows FIRMWARE_REQUIREMENTS 6.2: app, then www, then report.
 func (d *Device) Install(ctx context.Context, m *core.Manifest) error {
 	report := func(status, msg string) {
-		d.do(ctx, "POST", "/dev/v1/update/report", core.UpdateReport{ReleaseID: m.ReleaseID, Status: status, Error: msg, Mode: m.Mode}, false, nil)
+		d.do(ctx, "POST", "/dev/v1/update/report", core.UpdateReport{ReleaseID: m.ReleaseID, DevBuildID: m.DevBuildID,
+			Status: status, Error: msg, Mode: m.Mode}, false, nil)
 	}
 	var app []byte
 	if m.App.Needed {
@@ -372,7 +386,13 @@ func (d *Device) Install(ctx context.Context, m *core.Manifest) error {
 			report("failed", err.Error())
 			return err
 		}
-		if _, err := espsig.Verify(plain, d.Keys.Firmware); err != nil {
+		if m.Dev {
+			// Developer device: no signature, but it must really be a dev build.
+			if desc, err := appdesc.Parse(plain); err != nil || !desc.HasZir || !desc.DevBuild() {
+				report("failed", "not a dev build")
+				return errors.New("dev manifest, but the image is not a dev build")
+			}
+		} else if _, err := espsig.Verify(plain, d.Keys.Firmware); err != nil {
 			report("failed", err.Error())
 			return err
 		}
@@ -415,7 +435,7 @@ func (d *Device) Install(ctx context.Context, m *core.Manifest) error {
 		d.LastWWW = www
 		d.State.WWWSHA256 = m.WWW.SHA256
 	}
-	d.State.ReleaseID = m.ReleaseID
+	d.State.ReleaseID, d.State.DevBuildID = m.ReleaseID, m.DevBuildID
 	report("installed", "")
 	return nil
 }

@@ -20,12 +20,30 @@
 <td><input type="number" name="max_{{.Name}}" value="{{.Limit.Max}}" min="{{.Limit.Min}}" max="{{.Limit.Max}}"></td></tr>{{end}}
 </table>
 {{if $claim.ExistingDevice}}<div class="row"><label class="inline"><input type="checkbox" name="reregister"> Перереєструвати існуючий прилад</label></div>{{end}}
+{{if isroot $.Actor}}<div class="row"><label class="inline"><input type="checkbox" name="dev"> Прилад розробника</label>
+<span class="muted">приймає збірки для розробки (CONFIG_ZIR_DEV_BUILD) без підпису; ознака входить у підписану конфігурацію</span></div>{{end}}
 <p><button>Зареєструвати з профілем {{.Code}}</button></p></form>
 {{else}}<p class="flash err">Немає активних профілів. Створіть профіль.</p>{{end}}
 {{else}}
+<h2>Прилади, що очікують</h2>
+<p class="muted">Прилад з bootstrap з'являється тут після підключення до Wi-Fi з виходом в інтернет. Сторінка оновлюється кожні 10 с.
+Натисніть «Додати» і введіть код з екрана приладу.</p>
+{{$pick := .Data.Pick}}{{$csrf := .CSRF}}
+<div class="scroll"><table><tr><th>MAC</th><th>Чип</th><th>Bootstrap</th><th>IP</th><th>З'явився</th><th>Код дійсний до</th><th></th></tr>
+{{range .Data.Pending}}<tr><td class="mono">{{.MAC}}{{if .ExistingSerial}}<br><span class="tag warn">MAC уже є: {{.ExistingSerial}}</span>{{end}}</td>
+<td>{{.ChipRev}}</td><td>{{.BootstrapVersion}}</td><td class="mono">{{.IP}}</td><td>{{dt .CreatedAt}}</td><td>{{dt .ExpiresAt}}</td>
+<td>{{if eq .RequestID $pick}}
+<form class="row" method="post" action="/register/claim"><input type="hidden" name="csrf" value="{{$csrf}}">
+<input type="hidden" name="request_id" value="{{.RequestID}}">
+<input type="text" name="code" size="10" placeholder="XXXX-XXXX" required autofocus autocomplete="off"><button>Перевірити</button>
+<a href="/register">скасувати</a></form>
+{{else}}<a class="btn" href="/register?pick={{.RequestID}}">Додати</a>{{end}}</td></tr>
+{{else}}<tr><td colspan="7" class="muted">Немає приладів, що очікують. Увімкніть прилад з bootstrap і підключіть його до Wi-Fi.</td></tr>{{end}}
+</table></div>
+<h2>Або за кодом</h2>
 <form class="card" method="post" action="/register/claim"><input type="hidden" name="csrf" value="{{.CSRF}}">
-<p>Введіть код з екрана приладу (bootstrap показує його після підключення до Wi-Fi).</p>
-<div class="row"><input type="text" name="code" class="big" size="10" placeholder="XXXX-XXXX" required autofocus autocomplete="off"><button>Знайти</button></div>
+<p class="muted">Код з екрана можна ввести й одразу, не шукаючи прилад у списку.</p>
+<div class="row"><input type="text" name="code" class="big" size="10" placeholder="XXXX-XXXX" required autocomplete="off"><button>Знайти</button></div>
 </form>
 {{end}}
 {{end}}
