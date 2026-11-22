@@ -6,7 +6,9 @@ services:
     build: ..
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://lcm:${POSTGRES_PASSWORD}@postgres/lcm?sslmode=disable
+      # Password goes via PGPASSWORD (read by pgx), not the URL: it may contain @ / # ? etc.
+      DATABASE_URL: postgres://lcm@postgres/lcm?sslmode=disable
+      PGPASSWORD: ${POSTGRES_PASSWORD}
       MASTER_KEY_FILE: /run/secrets/master_key
       PUBLIC_URL: https://${LCM_DOMAIN}
     secrets: [master_key]

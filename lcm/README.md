@@ -90,7 +90,7 @@ bin/lcmctl dev-devices                           # що на яких прила
 
 ```sh
 git clone <repo> /opt/zir-lcm && cd /opt/zir-lcm/lcm/deploy
-cp .env.example .env && $EDITOR .env                      # LCM_DOMAIN, POSTGRES_PASSWORD
+cp .env.example .env && $EDITOR .env                      # LCM_DOMAIN, POSTGRES_PASSWORD='…' (з $ — лише в одинарних лапках)
 docker compose build
 
 # Каталоги і мастер-ключ. Контейнер працює від uid 65532 (distroless nonroot).
