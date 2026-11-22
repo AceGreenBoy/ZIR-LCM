@@ -204,7 +204,7 @@ registration_requests (
 -- Устройства
 devices (
   id uuid pk,
-  serial text unique,                 -- человекочитаемый номер, выдаётся при регистрации
+  serial text unique,                 -- человекочитаемый номер, выдаётся при регистрации: ZIR- + 7 случайных символов Crockford (не порядковый)
   mac macaddr unique, chip_rev text,
   profile_id uuid references hw_profiles,
   status text check (status in ('active','revoked')),

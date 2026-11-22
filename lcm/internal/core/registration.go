@@ -65,6 +65,39 @@ func newClaimCode() string {
 	return string(out)
 }
 
+// Serials are random, not sequential: a serial seen on one device must not
+// tell how many devices exist. 7 Crockford characters (no I, L, O, U) =
+// 32^7 ≈ 3.4e10; existing ZIR3M-000001-style serials stay as they are.
+const (
+	serialPrefix = "ZIR-"
+	serialLen    = 7
+)
+
+func randomSerial() string {
+	b := randBytes(serialLen)
+	out := make([]byte, serialLen)
+	for i, v := range b {
+		out[i] = crockford[int(v)%32]
+	}
+	return serialPrefix + string(out)
+}
+
+// newSerial picks a random serial not taken yet (the UNIQUE constraint still
+// guards a race between two approvals).
+func newSerial(ctx context.Context, q db.Q) (string, error) {
+	for range 10 {
+		s := randomSerial()
+		var taken bool
+		if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM devices WHERE serial=$1)`, s).Scan(&taken); err != nil {
+			return "", err
+		}
+		if !taken {
+			return s, nil
+		}
+	}
+	return "", fmt.Errorf("no free serial after 10 tries")
+}
+
 // FormatClaim shows a code as XXXX-XXXX.
 func FormatClaim(code string) string {
 	if len(code) == 8 {
@@ -385,11 +418,9 @@ func (c *Core) Approve(ctx context.Context, a Actor, in ApproveInput) (deviceID 
 		var serial string
 		var cfgVersion int
 		if existingID == "" {
-			var n int64
-			if err := tx.QueryRow(ctx, `SELECT nextval('device_serial_seq')`).Scan(&n); err != nil {
+			if serial, err = newSerial(ctx, tx); err != nil {
 				return err
 			}
-			serial = fmt.Sprintf("ZIR3M-%06d", n)
 			cfgVersion = 1
 			_, err = tx.Exec(ctx, `INSERT INTO devices (id, serial, mac, chip_rev, profile_id, dev_sign_pub, dev_kex_pub,
 				ota_key_enc, ota_pub_der, web_password_enc, web_password_changed_at, config_version, registered_by, dev_mode)

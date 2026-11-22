@@ -178,7 +178,7 @@ func (c *Core) AssignDevBuild(ctx context.Context, a Actor, buildID string, devi
 			var id, serial, devProfile, status string
 			var dev bool
 			err := tx.QueryRow(ctx, `SELECT id, serial, profile_id::text, status, dev_mode FROM devices
-				WHERE id::text=$1 OR serial=$1 FOR UPDATE`, ref).Scan(&id, &serial, &devProfile, &status, &dev)
+				WHERE id::text=$1 OR serial=upper($1) FOR UPDATE`, ref).Scan(&id, &serial, &devProfile, &status, &dev)
 			if db.IsNoRows(err) {
 				return userErr(404, "not_found", "прилад %s не знайдено", ref)
 			}

@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -102,6 +103,9 @@ func setup(t *testing.T) *env {
 
 func randBytes(n int) []byte { b := make([]byte, n); rand.Read(b); return b }
 
+// Random, not sequential (core.newSerial).
+var serialRe = regexp.MustCompile(`^ZIR-[0-9A-HJKMNP-TV-Z]{7}$`)
+
 func (e *env) user(login, role string) core.Actor {
 	var id string
 	if err := e.core.Pool.QueryRow(e.ctx, `INSERT INTO users (login, password_hash) VALUES ($1,'x') RETURNING id`, login).Scan(&id); err != nil {
@@ -148,7 +152,7 @@ func (e *env) registerDevice(mac string) *devicesim.Device {
 	e.must(err)
 	st, err = d.PollRegistration(e.ctx)
 	e.must(err)
-	if st != "approved" || d.State.DeviceID == "" || !strings.HasPrefix(d.State.Serial, "ZIR3M-") {
+	if st != "approved" || d.State.DeviceID == "" || !serialRe.MatchString(d.State.Serial) {
 		e.t.Fatalf("registration: %s %+v", st, d.State)
 	}
 	e.must(d.Auth(e.ctx))

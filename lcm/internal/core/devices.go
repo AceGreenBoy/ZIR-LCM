@@ -321,7 +321,7 @@ func (c *Core) Devices(ctx context.Context, filter string) ([]Device, error) {
 }
 
 func (c *Core) Device(ctx context.Context, id string) (Device, error) {
-	d, err := scanDevice(c.Pool.QueryRow(ctx, deviceSelect+` WHERE d.id::text=$1 OR d.serial=$1`, id))
+	d, err := scanDevice(c.Pool.QueryRow(ctx, deviceSelect+` WHERE d.id::text=$1 OR d.serial=upper($1)`, id))
 	if db.IsNoRows(err) {
 		return d, userErr(404, "not_found", "прилад не знайдено")
 	}

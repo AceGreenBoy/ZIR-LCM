@@ -60,7 +60,7 @@ bin/devicesim -server http://localhost:8090 -state dev1.json watch      # при
 
 ```sh
 export LCM_URL=http://localhost:8090 LCM_TOKEN=zirlcm_...
-bin/lcmctl push-dev -devices ZIR3M-000001,ZIR3M-000002 -critical .pio/build/esp32dev/firmware.bin
+bin/lcmctl push-dev -devices ZIR-7K2Q9XM,ZIR-B4N8T0C -critical .pio/build/esp32dev/firmware.bin
 bin/lcmctl push-dev -devices all firmware.bin    # усім приладам розробника профілю збірки
 bin/lcmctl dev-devices                           # що на яких приладах
 ```
