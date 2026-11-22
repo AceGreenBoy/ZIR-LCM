@@ -1,4 +1,4 @@
-# Production on the VPS behind the existing Traefik (external network "traefik").
+# Production on the VPS behind the existing Traefik (external network "shared_network").
 # Before the first start see README.md → «Розгортання».
 services:
   lcm:
@@ -6,9 +6,7 @@ services:
     build: ..
     restart: unless-stopped
     environment:
-      # Password goes via PGPASSWORD (read by pgx), not the URL: it may contain @ / # ? etc.
-      DATABASE_URL: postgres://lcm@postgres/lcm?sslmode=disable
-      PGPASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_URL: postgres://lcm:${POSTGRES_PASSWORD}@postgres/lcm?sslmode=disable
       MASTER_KEY_FILE: /run/secrets/master_key
       PUBLIC_URL: https://${LCM_DOMAIN}
     secrets: [master_key]
@@ -16,7 +14,7 @@ services:
     depends_on: [postgres]
     labels:
       - traefik.enable=true
-      - traefik.docker.network=traefik
+      - traefik.docker.network=shared_network
       - traefik.http.routers.lcm.rule=Host(`${LCM_DOMAIN}`)
       - traefik.http.routers.lcm.entrypoints=websecure
       - traefik.http.routers.lcm.tls.certresolver=letsencrypt
@@ -29,7 +27,7 @@ services:
       - traefik.http.routers.lcm-limited.service=lcm
       - traefik.http.middlewares.lcm-ratelimit.ratelimit.average=10
       - traefik.http.middlewares.lcm-ratelimit.ratelimit.burst=20
-    networks: [traefik, internal]
+    networks: [shared_network, internal]
   postgres:
     image: postgres:16
     restart: unless-stopped
@@ -42,5 +40,5 @@ services:
 secrets:
   master_key: { file: /srv/lcm/secrets/master.key }   # chmod 600
 networks:
-  traefik: { external: true }
+  shared_network: { external: true }
   internal: {}
