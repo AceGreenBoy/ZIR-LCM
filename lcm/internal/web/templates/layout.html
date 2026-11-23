@@ -8,6 +8,7 @@
 <nav>
 <a href="/devices" {{if eq .Nav "devices" "device"}}class="on"{{end}}>Прилади</a>
 {{if has .Actor "manufacturer"}}<a href="/register" {{if eq .Nav "register"}}class="on"{{end}}>Реєстрація</a>{{end}}
+{{if has .Actor "manufacturer" "engineer"}}<a href="/flash" {{if eq .Nav "flash"}}class="on"{{end}}>Прошивка USB</a>{{end}}
 <a href="/releases" {{if eq .Nav "releases"}}class="on"{{end}}>Релізи</a>
 <a href="/builds" {{if eq .Nav "builds"}}class="on"{{end}}>Збірки</a>
 <a href="/profiles" {{if eq .Nav "profiles"}}class="on"{{end}}>Профілі</a>

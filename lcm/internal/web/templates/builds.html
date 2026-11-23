@@ -14,6 +14,12 @@
 <p class="muted"><code>www.tar</code> з <code>npm run build &amp;&amp; npm run pack</code>. Усередині має бути нестиснутий <code>manifest.json</code> з <code>version</code> і <code>www_api</code>.</p>
 <div class="row"><input type="file" name="www" accept=".tar" required></div>
 <button>Завантажити</button></form>
+<form class="card" method="post" action="/builds/bootstrap" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{.CSRF}}">
+<h2 style="margin-top:0">Bootstrap</h2>
+<p class="muted">Один образ з адреси 0x0: <code>bootstrap/.pio/build/bootstrap/zir3m-bootstrap-&lt;версія&gt;.bin</code>.
+Сервер перевірить розмітку, версію і що образ зібрано для цього сервера (його ключі). Прошивається зі сторінки <a href="/flash">«Прошивка USB»</a>.</p>
+<div class="row"><input type="file" name="bootstrap" accept=".bin" required></div>
+<button>Завантажити</button></form>
 </div>
 {{end}}
 <div class="scroll"><table><tr><th>Час</th><th>Тип</th><th>Профіль</th><th>Версія</th><th>www_api</th><th>Розмір</th><th>SHA-256</th><th>Файли</th></tr>
@@ -21,6 +27,7 @@
 <td class="mono">{{short .SHA256}}{{if .Unchanged}}<br><span class="tag">код не змінився</span>{{end}}</td>
 <td>{{if eq .Kind "dev_app"}}<a href="/builds/{{.ID}}/app.bin">app.bin (без підпису)</a> · <a href="/dev?build={{.ID}}">призначити</a>{{if .HasELF}}<br><a href="/builds/{{.ID}}/app.elf">app.elf</a>{{end}}
 {{else if eq .Kind "app"}}<a href="/builds/{{.ID}}/app.bin">app.bin (підписаний)</a>{{if .HasELF}}<br><a href="/builds/{{.ID}}/app.elf">app.elf</a>{{end}}
+{{else if eq .Kind "bootstrap"}}<a href="/builds/{{.ID}}/bootstrap.bin">bootstrap.bin (з 0x0)</a> · <a href="/flash">прошити</a>
 {{else}}<a href="/builds/{{.ID}}/www.zwww">.zwww</a><br><a href="/builds/{{.ID}}/www.tar">www.tar</a>{{end}}</td></tr>
 {{else}}<tr><td colspan="8" class="muted">Збірок ще немає</td></tr>{{end}}</table></div>
 <p class="muted">Підписаний app.bin можна прошити по USB (<code>esptool.py write_flash 0x10000 app.bin</code>), щоб повернути прилад зі збірки для розробки в цикл OTA.</p>

@@ -42,7 +42,7 @@
 {{else}}<tr><td colspan="6" class="muted">Ще немає</td></tr>{{end}}</table></div>
 
 <h2>Токени API</h2>
-<p class="muted">Для <code>lcmctl push-dev</code> і цілі PlatformIO. Токен діє від імені власника з його поточними ролями, лише для збірок розробника, 90 днів.</p>
+<p class="muted">Для <code>lcmctl push-dev</code>, <code>lcmctl push-bootstrap</code> і цілі PlatformIO. Токен діє від імені власника з його поточними ролями, лише для збірок розробника й bootstrap, 90 днів.</p>
 <form class="card row" method="post" action="/dev/tokens"><input type="hidden" name="csrf" value="{{$csrf}}">
 <input type="text" name="name" placeholder="Назва, наприклад «ноутбук»" required size="30"><button>Створити токен</button></form>
 <div class="scroll"><table><tr><th>Назва</th><th>Власник</th><th>Створено</th><th>Діє до</th><th>Використано</th><th></th></tr>

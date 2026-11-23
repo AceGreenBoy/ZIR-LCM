@@ -12,7 +12,7 @@ import (
 // API tokens let lcmctl push-dev (from a developer's machine or PlatformIO)
 // upload and assign dev builds without the browser login. A token acts as its
 // owner with the owner's current roles, and the API it opens is limited to
-// dev builds (internal/httpapi/admin.go).
+// dev builds and bootstrap uploads (internal/httpapi/admin.go).
 
 const (
 	apiTokenTTL    = 90 * 24 * time.Hour

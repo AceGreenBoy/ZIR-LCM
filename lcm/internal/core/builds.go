@@ -289,13 +289,18 @@ func (c *Core) Builds(ctx context.Context, kind string) ([]Build, error) {
 }
 
 // BuildFile returns the path of a downloadable build file: "app.bin"
-// (signed, for USB flashing), "app.elf", "www.tar", "www.zwww".
+// (signed, for USB flashing), "app.elf", "www.tar", "www.zwww",
+// "bootstrap.bin" (also for the manufacturer: the USB flashing page).
 func (c *Core) BuildFile(ctx context.Context, a Actor, buildID, name string) (string, error) {
-	if err := a.require(RoleEngineer); err != nil {
+	roles := []string{RoleEngineer}
+	if name == "bootstrap.bin" {
+		roles = append(roles, RoleManufacturer)
+	}
+	if err := a.require(roles...); err != nil {
 		return "", err
 	}
 	switch name {
-	case "app.bin", "app.elf", "www.tar", "www.zwww":
+	case "app.bin", "app.elf", "www.tar", "www.zwww", "bootstrap.bin":
 	default:
 		return "", userErr(404, "not_found", "немає такого файлу")
 	}

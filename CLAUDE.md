@@ -63,6 +63,8 @@ ZIR-3M — портативный детектор FPV-видеосигнало�
 - `internal/core` — вся доменная логика; `internal/httpapi` — `/dev/v1`; `internal/web` — админка (шаблоны, без JS).
 - `internal/crypto/*` — `espsig` (Secure Boot V2), `encimg` (`esp_encrypted_img`), `jws`, `ecies`, `envelope`, `appdesc`.
 - `internal/signer` — ключи сервера (в БД под мастер-ключом). `internal/devicesim` — эталон клиентской части протокола.
+- `internal/flashimg` — разбор образа bootstrap с 0x0. Админка без JS, кроме «Прошивка USB»
+  (`internal/web/static/flash.js` + esptool-js в `static/esptool/`, Web Serial).
 - `migrations/` — goose, встроены в бинарник. `internal/e2e` — сквозной тест.
 
 ## Запуск и проверка

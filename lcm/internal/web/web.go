@@ -1,4 +1,5 @@
-// Package web is the admin UI: server-rendered pages, plain HTML forms.
+// Package web is the admin UI: server-rendered pages, plain HTML forms. The
+// one exception is /flash (static/flash.js): USB flashing needs Web Serial.
 package web
 
 import (
@@ -119,6 +120,9 @@ func (h *Handler) Routes() http.Handler {
 		r.Get("/builds", h.builds)
 		r.Post("/builds/app", h.uploadApp)
 		r.Post("/builds/www", h.uploadWWW)
+		r.Post("/builds/bootstrap", h.uploadBootstrap)
+		r.Get("/flash", h.flashPage)
+		r.Post("/flash/done", h.flashDone)
 		r.Get("/builds/{id}/{file}", h.buildFile)
 		r.Get("/releases", h.releases)
 		r.Post("/releases", h.releaseCreate)

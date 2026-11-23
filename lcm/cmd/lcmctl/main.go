@@ -46,6 +46,9 @@ const usage = `lcmctl — адміністрування сервера прош
   push-dev [-devices S1,S2|all] [-critical] <firmware.bin>
                                    завантажити збірку для розробки й призначити приладам розробника
   dev-devices                      прилади розробника і їхні збірки
+  push-bootstrap <zir3m-bootstrap-X.bin>
+                                   завантажити bootstrap (один образ з 0x0) для «Прошивка USB»
+  bootstrap-builds                 збірки bootstrap на сервері
 
 Змінні: DATABASE_URL, MASTER_KEY_FILE.
 `
@@ -73,6 +76,10 @@ func run(ctx context.Context, cmd string, args []string) error {
 		return pushDev(args)
 	case "dev-devices":
 		return devDevices()
+	case "push-bootstrap":
+		return pushBootstrap(args)
+	case "bootstrap-builds":
+		return bootstrapBuilds()
 	}
 	if cmd == "gen-master-key" {
 		if len(args) != 1 {

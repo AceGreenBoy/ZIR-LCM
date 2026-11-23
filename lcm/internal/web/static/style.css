@@ -24,3 +24,4 @@ button.sec{background:transparent;color:var(--acc);border:1px solid var(--line)}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:0}dt{color:var(--muted)}dd{margin:0;word-break:break-all}
 .login{max-width:360px;margin:60px auto}.login input{width:100%;margin-bottom:10px}.big{font-size:26px;letter-spacing:3px;font-family:ui-monospace,monospace}
 pre{white-space:pre-wrap;word-break:break-all;margin:0}
+[hidden]{display:none!important}button:disabled{opacity:.45;cursor:default}

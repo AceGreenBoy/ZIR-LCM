@@ -69,6 +69,25 @@ bin/lcmctl dev-devices                           # що на яких прила
 `ZIR_3M/test/lcm_host/run.sh` (вектори — `go run ./cmd/fwvectors`, протокол — `TestFirmwareClient`).
 `lcmctl export-pubkeys` кладе в `zir_server_keys.h` і ключі підпису прошивок (`ZIR_KEYS_FWSIGN`) для bootstrap.
 
+### Bootstrap і прошивка по USB з браузера
+
+Bootstrap збирається для конкретного сервера (`ZIR_3M/lcm_server/`: `url.txt` і `zir_server_keys.h` з
+`lcmctl export-pubkeys` саме цього сервера). Сервер приймає лише один образ з 0x0
+`bootstrap/.pio/build/bootstrap/zir3m-bootstrap-<версія>.bin`. Він перевіряє розмітку (завантажувач,
+таблиця розділів, `zir_bootstrap` в `ota_0`, 4MB), semver-версію і наявність ключа конфігурацій цього сервера.
+
+```sh
+bin/lcmctl push-bootstrap zir3m-bootstrap-0.1.0.bin   # або адмінка → «Збірки» → Bootstrap
+pio run -d bootstrap -t lcm                            # у ZIR_3M: зібрати й завантажити (lcm_server/url.txt, token.txt)
+bin/lcmctl bootstrap-builds
+```
+
+Адмінка → «Прошивка USB» (ролі manufacturer, engineer): «Підключити» → обрати порт адаптера (CH340,
+CP210x, FTDI) → «Прошити». Сторінка працює через Web Serial і esptool-js (`internal/web/static/esptool/`,
+див. там README). Потрібні Chrome, Edge чи Opera на комп'ютері й HTTPS або localhost. Пишеться лише flash,
+eFuse не чіпаються. Запис перевіряється MD5. Хто, коли і який bootstrap записав на чип з яким MAC,
+видно в аудиті (`bootstrap.flash`).
+
 ## Робота з прошивкою
 
 Покрокове завдання для репозиторію прошивки — `ZIR_3M/docs/lcm-build.md`.

@@ -12,8 +12,8 @@ import (
 	"zir/lcm/internal/core"
 )
 
-// AdminAPI is the token API for lcmctl push-dev (/api/v1). It covers only
-// developer builds: everything else stays in the admin UI behind TOTP.
+// AdminAPI is the token API for lcmctl (/api/v1). It covers only developer
+// builds and bootstrap uploads: everything else stays in the admin UI behind TOTP.
 type AdminAPI struct{ Core *core.Core }
 
 type actorKey struct{}
@@ -25,6 +25,8 @@ func (a *AdminAPI) Routes() http.Handler {
 	r.Use(a.auth)
 	r.Get("/dev-devices", a.devDevices)
 	r.Post("/dev-builds", a.devBuild)
+	r.Get("/bootstrap-builds", a.bootstrapBuilds)
+	r.Post("/bootstrap-builds", a.bootstrapUpload)
 	return r
 }
 
@@ -139,4 +141,57 @@ func (a *AdminAPI) devBuild(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, reply)
+}
+
+// BootstrapBuild is a row of GET /api/v1/bootstrap-builds and the reply of POST.
+type BootstrapBuild struct {
+	BuildID   string    `json:"build_id"`
+	Version   string    `json:"version"`
+	Size      int       `json:"size"`
+	SHA256    string    `json:"sha256"`
+	CreatedAt time.Time `json:"created_at"`
+	CreatedBy string    `json:"created_by,omitempty"`
+}
+
+func (a *AdminAPI) bootstrapBuilds(w http.ResponseWriter, r *http.Request) {
+	if !tokenActor(r).Roles[core.RoleSuperadmin] {
+		writeErr(w, &core.Error{Status: 403, Code: "forbidden", Msg: "лише superadmin"})
+		return
+	}
+	list, err := a.Core.Builds(r.Context(), "bootstrap")
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	out := []BootstrapBuild{}
+	for _, b := range list {
+		out = append(out, BootstrapBuild{BuildID: b.ID, Version: b.Version, Size: b.Size, SHA256: b.SHA256, CreatedAt: b.CreatedAt, CreatedBy: b.CreatedBy})
+	}
+	writeJSON(w, 200, out)
+}
+
+// bootstrapUpload: multipart form with "image" (zir3m-bootstrap-<version>.bin).
+func (a *AdminAPI) bootstrapUpload(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxAppUpload+64<<10)
+	if err := r.ParseMultipartForm(maxAppUpload); err != nil {
+		writeErr(w, &core.Error{Status: 400, Code: "bad_request", Msg: "multipart form expected: " + err.Error()})
+		return
+	}
+	f, _, err := r.FormFile("image")
+	if err != nil {
+		writeErr(w, &core.Error{Status: 400, Code: "bad_request", Msg: "no image file"})
+		return
+	}
+	defer f.Close()
+	img, err := io.ReadAll(io.LimitReader(f, maxAppUpload))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	b, err := a.Core.UploadBootstrap(r.Context(), tokenActor(r), img)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, BootstrapBuild{BuildID: b.ID, Version: b.Version, Size: b.Size, SHA256: b.SHA256, CreatedAt: time.Now()})
 }

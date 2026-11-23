@@ -1,0 +1,45 @@
+{{define "content"}}
+<h1>Прошивка bootstrap по USB</h1>
+<div id="flash" data-csrf="{{.CSRF}}">
+{{if not .Data.Builds}}
+<div class="flash err">На сервері ще немає збірок bootstrap.{{if isroot .Actor}} Завантажте <code>zir3m-bootstrap-&lt;версія&gt;.bin</code> на сторінці <a href="/builds">«Збірки»</a> або <code>lcmctl push-bootstrap</code>.{{else}} Попросіть superadmin завантажити її.{{end}}</div>
+{{end}}
+<div class="grid">
+<div class="card">
+<h2 style="margin-top:0">1. Підключення</h2>
+<p class="muted">Під'єднайте прилад через USB-UART адаптер (CH340, CP210x, FTDI) і натисніть «Підключити»: браузер запропонує обрати порт.
+Працює в Chrome, Edge, Opera на комп'ютері, лише через HTTPS або localhost.</p>
+<div class="row">Швидкість: <select id="fl-baud">
+<option value="115200">115200</option>
+<option value="460800" selected>460800</option>
+<option value="921600">921600</option>
+</select></div>
+<div class="row"><button id="fl-connect" type="button">Підключити</button> <button id="fl-disconnect" type="button" class="sec" disabled>Від'єднати</button></div>
+<div id="fl-chip" hidden><p>Чип: <b id="fl-chip-desc"></b><br>MAC: <span class="mono" id="fl-chip-mac"></span></p></div>
+<p class="muted">Адаптер лише з TX/RX/GND не перезапускає чип сам: перед підключенням з'єднайте GPIO0 із землею й увімкніть живлення
+(або натисніть RESET), після підключення GPIO0 можна відпустити. Плата з DTR/RTS входить у завантажувач сама.
+Windows: потрібен драйвер WCH для CH340.</p>
+</div>
+<div class="card">
+<h2 style="margin-top:0">2. Запис</h2>
+<div class="row">Збірка: <select id="fl-build">
+{{range $i, $b := .Data.Builds}}<option value="{{$b.ID}}" data-version="{{$b.Version}}">bootstrap {{$b.Version}} · {{dt $b.CreatedAt}}{{if eq $i 0}} (остання){{end}}</option>{{end}}
+</select></div>
+<div class="row"><label><input type="checkbox" id="fl-erase"> Стерти всю flash перед записом</label></div>
+<p class="muted">Без стирання образ пише з 0x0 до кінця ota_0: завантажувач, таблиця розділів, nvs (Wi-Fi забувається), bootstrap.
+Розділи identity і www лишаються, тож зареєстрований прилад лишиться зареєстрованим.
+Стирання всієї flash знищує ключі: прилад реєструється заново.</p>
+<div class="row"><button id="fl-flash" type="button" disabled>Прошити</button></div>
+<progress id="fl-progress" max="1" value="0" hidden style="width:100%"></progress>
+</div>
+</div>
+<div id="fl-status" class="flash" hidden></div>
+<div id="fl-done" class="flash ok" hidden>
+Bootstrap <b id="fl-done-version"></b> записано, прилад перезапущено (MAC <span class="mono" id="fl-done-mac"></span>).
+Далі: точка доступу <code>ZIR3M-XXXX</code> з паролем з екрана → <code>http://192.168.4.1</code> → мережа з інтернетом.
+Прилад з'явиться на сторінці <a href="/register">«Реєстрація»</a> і покаже код.
+</div>
+<details><summary>Журнал</summary><pre id="fl-log" class="mono" style="max-height:20em;overflow:auto;white-space:pre-wrap"></pre></details>
+</div>
+<script type="module" src="/static/flash.js"></script>
+{{end}}
