@@ -68,6 +68,29 @@ func TestBootstrapBuilds(t *testing.T) {
 		t.Fatalf("audit mac %q", mac)
 	}
 
+	// Public page (no login): anonymous record with the IP, rate-limited;
+	// only bootstrap images are served.
+	anon := core.Actor{IP: "198.51.100.7"}
+	e.must(e.core.BootstrapFlashed(ctx, anon, b.ID, "24:0a:c4:00:00:01", "ESP32", true))
+	var actorType string
+	var public bool
+	e.must(e.core.Pool.QueryRow(ctx, `SELECT actor_type, (details->>'public')::bool FROM audit_log
+		WHERE action='bootstrap.flash' AND host(ip)='198.51.100.7'`).Scan(&actorType, &public))
+	if actorType != "system" || !public {
+		t.Fatalf("anonymous flash audit: %s %v", actorType, public)
+	}
+	for i := 1; i < 200; i++ {
+		e.must(e.core.BootstrapFlashed(ctx, anon, b.ID, "24:0a:c4:00:00:01", "ESP32", false))
+	}
+	e.wantCode(e.core.BootstrapFlashed(ctx, anon, b.ID, "24:0a:c4:00:00:01", "ESP32", false), "rate_limited")
+	if _, err := e.core.PublicBootstrapFile(ctx, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.profile()
+	appID := e.uploadApp("1.0.0", 1)
+	_, err = e.core.PublicBootstrapFile(ctx, appID)
+	e.wantCode(err, "not_found")
+
 	// lcmctl push-bootstrap
 	tok, err := e.core.CreateAPIToken(ctx, e.super, "ci")
 	e.must(err)

@@ -1,6 +1,8 @@
 {{define "content"}}
 <h1>Прошивка bootstrap по USB</h1>
-<div id="flash" data-csrf="{{.CSRF}}">
+<div id="flash" data-csrf="{{.CSRF}}" data-image="{{.Data.Image}}" data-done="{{.Data.Done}}">
+{{if .Data.Public}}<p class="muted">Сторінка без входу: записує bootstrap, який завантажив адміністратор LCM. Зареєструвати прилад може лише інженер в адмінці.{{if not .Actor.UserID}} <a href="/login">Вхід в адмінку</a>{{end}}</p>
+{{else}}<p class="muted">Без входу ця ж сторінка доступна за адресою <a href="/bootstrap">/bootstrap</a> (для виробництва).</p>{{end}}
 {{if not .Data.Builds}}
 <div class="flash err">На сервері ще немає збірок bootstrap.{{if isroot .Actor}} Завантажте <code>zir3m-bootstrap-&lt;версія&gt;.bin</code> на сторінці <a href="/builds">«Збірки»</a> або <code>lcmctl push-bootstrap</code>.{{else}} Попросіть superadmin завантажити її.{{end}}</div>
 {{end}}
@@ -37,7 +39,7 @@ Windows: потрібен драйвер WCH для CH340.</p>
 <div id="fl-done" class="flash ok" hidden>
 Bootstrap <b id="fl-done-version"></b> записано, прилад перезапущено (MAC <span class="mono" id="fl-done-mac"></span>).
 Далі: точка доступу <code>ZIR3M-XXXX</code> з паролем з екрана → <code>http://192.168.4.1</code> → мережа з інтернетом.
-Прилад з'явиться на сторінці <a href="/register">«Реєстрація»</a> і покаже код.
+{{if .Data.Public}}Прилад покаже код реєстрації: передайте його інженеру, він підтвердить прилад в адмінці LCM.{{else}}Прилад з'явиться на сторінці <a href="/register">«Реєстрація»</a> і покаже код.{{end}}
 </div>
 <details><summary>Журнал</summary><pre id="fl-log" class="mono" style="max-height:20em;overflow:auto;white-space:pre-wrap"></pre></details>
 </div>

@@ -11,6 +11,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/uuid"
 
+	"zir/lcm/internal/audit"
 	"zir/lcm/internal/db"
 	"zir/lcm/internal/flashimg"
 	"zir/lcm/internal/signer"
@@ -112,12 +113,16 @@ func (c *Core) UploadBootstrap(ctx context.Context, a Actor, img []byte) (Build,
 	return Build{ID: id, Kind: "bootstrap", Version: in.Version, Size: len(img), SHA256: hex.EncodeToString(sum[:])}, err
 }
 
-// BootstrapFlashed records that the admin UI wrote a bootstrap to a chip, so
+// BootstrapFlashed records that the browser wrote a bootstrap to a chip, so
 // the audit log ties a MAC to the image and the person (the browser reports
-// it; nothing here is trusted beyond that).
+// it; nothing here is trusted beyond that). An empty actor means the public
+// page (no login): the entry is a "system" one with the IP, rate-limited.
 func (c *Core) BootstrapFlashed(ctx context.Context, a Actor, buildID, mac, chip string, erased bool) error {
-	if err := a.require(RoleManufacturer, RoleEngineer); err != nil {
-		return err
+	anon := a.UserID == ""
+	if !anon {
+		if err := a.require(RoleManufacturer, RoleEngineer); err != nil {
+			return err
+		}
 	}
 	if _, err := uuid.Parse(buildID); err != nil {
 		return userErr(404, "not_found", "немає такої збірки")
@@ -136,8 +141,38 @@ func (c *Core) BootstrapFlashed(ctx context.Context, a Actor, buildID, mac, chip
 		}
 		return err
 	}
-	return a.audit(ctx, c.Pool, "bootstrap.flash", "build", buildID, map[string]any{
-		"version": version, "mac": mac, "chip": chip, "erase_all": erased})
+	details := map[string]any{"version": version, "mac": mac, "chip": chip, "erase_all": erased}
+	if !anon {
+		return a.audit(ctx, c.Pool, "bootstrap.flash", "build", buildID, details)
+	}
+	var n int
+	if err := c.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='bootstrap.flash' AND actor_type='system'
+		AND ip=$1::inet AND at > now() - interval '1 hour'`, a.IP).Scan(&n); err != nil {
+		return err
+	}
+	if n >= flashPerIPHour {
+		return userErr(429, "rate_limited", "забагато записів з цієї адреси за годину")
+	}
+	details["public"] = true
+	return audit.Log(ctx, c.Pool, audit.Entry{ActorType: "system", Action: "bootstrap.flash", TargetType: "build",
+		TargetID: audit.Str(buildID), Details: details, IP: a.IP})
+}
+
+// flashPerIPHour limits audit records from the public flashing page.
+const flashPerIPHour = 200
+
+// PublicBootstrapFile serves a bootstrap image without login: it holds no
+// secrets (ARCHITECTURE 10). Only bootstrap builds, nothing else.
+func (c *Core) PublicBootstrapFile(ctx context.Context, buildID string) (string, error) {
+	if _, err := uuid.Parse(buildID); err != nil {
+		return "", userErr(404, "not_found", "немає такої збірки")
+	}
+	var p string
+	err := c.Pool.QueryRow(ctx, `SELECT artifact_path FROM builds WHERE id::text=$1 AND kind='bootstrap' AND status='success'`, buildID).Scan(&p)
+	if db.IsNoRows(err) {
+		return "", userErr(404, "not_found", "немає такої збірки")
+	}
+	return p, err
 }
 
 var macRe = regexp.MustCompile(`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`)

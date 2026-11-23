@@ -1,5 +1,6 @@
 // Package web is the admin UI: server-rendered pages, plain HTML forms. The
-// one exception is /flash (static/flash.js): USB flashing needs Web Serial.
+// one exception is /flash and its public twin /bootstrap (static/flash.js):
+// USB flashing needs Web Serial.
 package web
 
 import (
@@ -100,6 +101,10 @@ func (h *Handler) Routes() http.Handler {
 	r.Get("/login/totp", h.totpPage)
 	r.Post("/login/totp", h.totpPost)
 	r.Post("/logout", h.logout)
+	// Bootstrap flashing without login: the image holds no secrets.
+	r.Get("/bootstrap", h.publicFlashPage)
+	r.Get("/bootstrap/{id}/bootstrap.bin", h.publicBootstrapFile)
+	r.Post("/bootstrap/done", h.publicFlashDone)
 	r.Group(func(r chi.Router) {
 		r.Use(h.requireLogin)
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/devices", http.StatusSeeOther) })

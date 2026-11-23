@@ -101,6 +101,7 @@
 - [x] Прошивка bootstrap по USB из браузера: вкладка «Прошивка USB» (manufacturer, engineer), Web Serial +
   esptool-js 0.7.1 (встроен в бинарник, `internal/web/static/esptool`). Проверка чипа (ESP32, ревизия ≥ 3),
   стирание всей flash по выбору, сверка MD5, запись в аудит `bootstrap.flash` с MAC.
+- [x] Прошивка bootstrap без входа: `/bootstrap` (ссылка со страницы входа), аудит от `system` с IP, лимит 200/ч на IP.
 - [ ] Проверить «Прошивка USB» на приборе: CH340 с автосбросом и без, 460800/921600, Windows-драйвер.
 - [x] Цель PlatformIO `-t lcm` / `-t lcm_critical` (`ZIR_3M/scripts/lcm_push.py`, вызывает `lcmctl push-dev`; токен — `lcm_server/token.txt` или `LCM_TOKEN`).
 

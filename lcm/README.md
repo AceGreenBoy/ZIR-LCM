@@ -82,11 +82,12 @@ pio run -d bootstrap -t lcm                            # у ZIR_3M: зібрат
 bin/lcmctl bootstrap-builds
 ```
 
-Адмінка → «Прошивка USB» (ролі manufacturer, engineer): «Підключити» → обрати порт адаптера (CH340,
+Адмінка → «Прошивка USB» (ролі manufacturer, engineer) або без входу — `https://<домен>/bootstrap`
+(посилання є на сторінці входу; для виробництва без облікового запису): «Підключити» → обрати порт адаптера (CH340,
 CP210x, FTDI) → «Прошити». Сторінка працює через Web Serial і esptool-js (`internal/web/static/esptool/`,
 див. там README). Потрібні Chrome, Edge чи Opera на комп'ютері й HTTPS або localhost. Пишеться лише flash,
 eFuse не чіпаються. Запис перевіряється MD5. Хто, коли і який bootstrap записав на чип з яким MAC,
-видно в аудиті (`bootstrap.flash`).
+видно в аудиті (`bootstrap.flash`; без входу — від `system` з IP, `"public": true`, не більше 200 на годину з IP).
 
 ## Робота з прошивкою
 

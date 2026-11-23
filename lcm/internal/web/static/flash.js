@@ -7,7 +7,9 @@ const MIN_CHIP_REV = 3; // bootstrap is built with CONFIG_ESP32_REV_MIN_3
 
 const $ = (id) => document.getElementById(id);
 const root = $("flash");
-const csrf = root.dataset.csrf;
+const csrf = root.dataset.csrf || "";
+const imagePrefix = root.dataset.image; // "/builds/" (admin) or "/bootstrap/" (public)
+const doneURL = root.dataset.done;
 
 const ui = {
   build: $("fl-build"),
@@ -114,14 +116,14 @@ async function connect() {
 }
 
 async function fetchImage(buildID) {
-  const resp = await fetch(`/builds/${encodeURIComponent(buildID)}/bootstrap.bin`, { credentials: "same-origin", cache: "no-store" });
+  const resp = await fetch(`${imagePrefix}${encodeURIComponent(buildID)}/bootstrap.bin`, { credentials: "same-origin", cache: "no-store" });
   if (!resp.ok) throw new Error(`образ не завантажено з сервера: HTTP ${resp.status} ${await resp.text()}`);
   return new Uint8Array(await resp.arrayBuffer());
 }
 
 async function report(buildID) {
   const body = new URLSearchParams({ csrf, build_id: buildID, mac: chipInfo.mac, chip: chipInfo.desc, erase: ui.erase.checked ? "1" : "" });
-  const resp = await fetch("/flash/done", { method: "POST", body, credentials: "same-origin" });
+  const resp = await fetch(doneURL, { method: "POST", body, credentials: "same-origin" });
   if (!resp.ok) log("журнал аудиту: HTTP " + resp.status + " " + (await resp.text()));
 }
 
