@@ -78,7 +78,10 @@ func CheckBootstrap(img []byte, keys []signer.PublicKey) (BootstrapInfo, error) 
 		"(lcm_server/zir_server_keys.h і url.txt мають бути з lcmctl export-pubkeys цього сервера)")
 }
 
-// UploadBootstrap stores a bootstrap image after CheckBootstrap.
+// UploadBootstrap stores a bootstrap image after CheckBootstrap. An image of
+// a version already on the server replaces it in place (same build id, new
+// upload time), so a fixed build doesn't need a new version number. The most
+// recently uploaded bootstrap is the one the public page writes.
 func (c *Core) UploadBootstrap(ctx context.Context, a Actor, img []byte) (Build, error) {
 	if !a.Roles[RoleSuperadmin] {
 		return Build{}, userErr(403, "forbidden", "завантажувати збірки може лише superadmin")
@@ -97,20 +100,55 @@ func (c *Core) UploadBootstrap(ctx context.Context, a Actor, img []byte) (Build,
 		return Build{}, err
 	}
 	id := uuid.NewString()
-	p := c.path("artifacts", id, "bootstrap.bin")
-	if err := writeFile(p, img); err != nil {
-		return Build{}, err
-	}
+	replaced := false
 	err = db.InTx(ctx, c.Pool, func(tx pgxTx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO builds (id, kind, version, status, artifact_path, sha256, size, created_by)
-			VALUES ($1,'bootstrap',$2,'success',$3,$4,$5,$6)`, id, in.Version, p, sum[:], len(img), a.UserID)
-		if err != nil {
+		var oldID string
+		var oldSum []byte
+		err := tx.QueryRow(ctx, `SELECT id::text, sha256 FROM builds WHERE kind='bootstrap' AND status='success' AND version=$1
+			ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, in.Version).Scan(&oldID, &oldSum)
+		if err != nil && !db.IsNoRows(err) {
+			return err
+		}
+		if err == nil {
+			// Same version: overwrite the file (atomic rename) and the row.
+			id, replaced = oldID, true
+			p := c.path("artifacts", id, "bootstrap.bin")
+			if _, err := tx.Exec(ctx, `UPDATE builds SET sha256=$2, size=$3, artifact_path=$4, created_at=now(), created_by=$5
+				WHERE id=$1`, id, sum[:], len(img), p, a.UserID); err != nil {
+				return err
+			}
+			if err := writeFile(p, img); err != nil {
+				return err
+			}
+			return a.audit(ctx, tx, "build.replace", "build", id, map[string]any{"kind": "bootstrap", "version": in.Version,
+				"old_sha256": hex.EncodeToString(oldSum), "sha256": hex.EncodeToString(sum[:])})
+		}
+		p := c.path("artifacts", id, "bootstrap.bin")
+		if err := writeFile(p, img); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO builds (id, kind, version, status, artifact_path, sha256, size, created_by)
+			VALUES ($1,'bootstrap',$2,'success',$3,$4,$5,$6)`, id, in.Version, p, sum[:], len(img), a.UserID); err != nil {
 			return err
 		}
 		return a.audit(ctx, tx, "build.upload", "build", id, map[string]any{
 			"kind": "bootstrap", "version": in.Version, "sha256": hex.EncodeToString(sum[:])})
 	})
-	return Build{ID: id, Kind: "bootstrap", Version: in.Version, Size: len(img), SHA256: hex.EncodeToString(sum[:])}, err
+	return Build{ID: id, Kind: "bootstrap", Version: in.Version, Size: len(img), SHA256: hex.EncodeToString(sum[:]),
+		Replaced: replaced}, err
+}
+
+// CurrentBootstrap is the bootstrap the public page writes: the most recently
+// uploaded (or replaced) one. ok is false when there is none.
+func (c *Core) CurrentBootstrap(ctx context.Context) (b Build, ok bool, err error) {
+	err = c.Pool.QueryRow(ctx, `SELECT id::text, version, size, encode(sha256,'hex'), created_at FROM builds
+		WHERE kind='bootstrap' AND status='success' ORDER BY created_at DESC LIMIT 1`).
+		Scan(&b.ID, &b.Version, &b.Size, &b.SHA256, &b.CreatedAt)
+	if db.IsNoRows(err) {
+		return b, false, nil
+	}
+	b.Kind = "bootstrap"
+	return b, err == nil, err
 }
 
 // BootstrapFlashed records that the browser wrote a bootstrap to a chip, so
@@ -162,15 +200,17 @@ func (c *Core) BootstrapFlashed(ctx context.Context, a Actor, buildID, mac, chip
 const flashPerIPHour = 200
 
 // PublicBootstrapFile serves a bootstrap image without login: it holds no
-// secrets (ARCHITECTURE 10). Only bootstrap builds, nothing else.
+// secrets (ARCHITECTURE 10). Only the current bootstrap (CurrentBootstrap):
+// the public page offers no choice of version.
 func (c *Core) PublicBootstrapFile(ctx context.Context, buildID string) (string, error) {
 	if _, err := uuid.Parse(buildID); err != nil {
 		return "", userErr(404, "not_found", "немає такої збірки")
 	}
-	var p string
-	err := c.Pool.QueryRow(ctx, `SELECT artifact_path FROM builds WHERE id::text=$1 AND kind='bootstrap' AND status='success'`, buildID).Scan(&p)
-	if db.IsNoRows(err) {
-		return "", userErr(404, "not_found", "немає такої збірки")
+	var cur, p string
+	err := c.Pool.QueryRow(ctx, `SELECT id::text, artifact_path FROM builds WHERE kind='bootstrap' AND status='success'
+		ORDER BY created_at DESC LIMIT 1`).Scan(&cur, &p)
+	if db.IsNoRows(err) || (err == nil && cur != buildID) {
+		return "", userErr(404, "not_found", "ця збірка bootstrap не поточна: оновіть сторінку")
 	}
 	return p, err
 }

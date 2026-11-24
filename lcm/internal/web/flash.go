@@ -13,10 +13,11 @@ import (
 )
 
 type flashData struct {
-	Builds []core.Build
-	Public bool   // /bootstrap, no login
-	Image  string // URL prefix of the image: <Image><id>/bootstrap.bin
-	Done   string // where flash.js reports a finished write
+	Builds []core.Build // admin page: every bootstrap, to choose from
+	Build  *core.Build  // public page: the current bootstrap only, no choice
+	Public bool         // /bootstrap, no login
+	Image  string       // URL prefix of the image: <Image><id>/bootstrap.bin
+	Done   string       // where flash.js reports a finished write
 }
 
 // ── bootstrap: upload and USB flashing from the browser ─────────────────────
@@ -36,15 +37,19 @@ func (h *Handler) flashPage(w http.ResponseWriter, r *http.Request) {
 	h.render(w, r, "flash", "Прошивка USB", flashData{Builds: list, Image: "/builds/", Done: "/flash/done"})
 }
 
-// publicFlashPage is /flash without login, for the production line: it can
-// only write a bootstrap the superadmin uploaded.
+// publicFlashPage is /flash without login, for the production line: it
+// writes only the current bootstrap (the last one the superadmin uploaded).
 func (h *Handler) publicFlashPage(w http.ResponseWriter, r *http.Request) {
-	list, err := h.Core.Builds(r.Context(), "bootstrap")
+	b, ok, err := h.Core.CurrentBootstrap(r.Context())
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	h.render(w, r, "flash", "Прошивка bootstrap", flashData{Builds: list, Public: true, Image: "/bootstrap/", Done: "/bootstrap/done"})
+	d := flashData{Public: true, Image: "/bootstrap/", Done: "/bootstrap/done"}
+	if ok {
+		d.Build = &b
+	}
+	h.render(w, r, "flash", "Прошивка bootstrap", d)
 }
 
 func (h *Handler) publicBootstrapFile(w http.ResponseWriter, r *http.Request) {
@@ -101,5 +106,9 @@ func (h *Handler) uploadBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, err := h.Core.UploadBootstrap(r.Context(), actor(r), img)
-	back(w, r, "/builds", err, "bootstrap "+b.Version+" перевірено й збережено; його можна прошити на сторінці «Прошивка USB»")
+	what := "збережено"
+	if b.Replaced {
+		what = "замінив попередній образ цієї версії"
+	}
+	back(w, r, "/builds", err, "bootstrap "+b.Version+" перевірено й "+what+"; тепер саме його пише сторінка /bootstrap")
 }

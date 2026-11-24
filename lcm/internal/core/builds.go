@@ -48,6 +48,7 @@ type Build struct {
 	Unchanged      bool   // comparable hash equals the previous build of the profile
 	WWWBuildID     string // dev_app: its own web UI (a dev_www build), if any
 	WWWVersion     string
+	Replaced       bool // UploadBootstrap: an existing build of this version was overwritten
 }
 
 // UploadApp accepts an unsigned app image built for a profile (PlatformIO or

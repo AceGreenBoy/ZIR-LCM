@@ -129,7 +129,8 @@ async function report(buildID) {
 
 async function flash() {
   const buildID = ui.build.value;
-  const version = ui.build.selectedOptions[0].dataset.version;
+  // A <select> on the admin page, a fixed hidden input on the public one.
+  const version = (ui.build.selectedOptions ? ui.build.selectedOptions[0] : ui.build).dataset.version;
   if (ui.erase.checked && !confirm("Стерти всю flash? Прилад втратить ключі (identity) і його доведеться зареєструвати заново.")) {
     return;
   }

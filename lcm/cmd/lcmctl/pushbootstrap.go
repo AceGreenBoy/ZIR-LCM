@@ -55,7 +55,10 @@ func pushBootstrap(args []string) error {
 	}
 	fmt.Printf("завантажено bootstrap %s (%s %s, %d КБ), збірка %s, sha256 %s\n", rep.Version, in.FlashSize, in.FlashMode,
 		rep.Size/1024, rep.BuildID, rep.SHA256[:16])
-	fmt.Println("прошити: адмінка → «Прошивка USB»")
+	if rep.Replaced {
+		fmt.Println("замінено образ цієї версії, що вже був на сервері")
+	}
+	fmt.Println("тепер саме його пише публічна сторінка /bootstrap (і адмінка → «Прошивка USB»)")
 	return nil
 }
 

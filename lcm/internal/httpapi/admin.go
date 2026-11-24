@@ -161,6 +161,7 @@ type BootstrapBuild struct {
 	SHA256    string    `json:"sha256"`
 	CreatedAt time.Time `json:"created_at"`
 	CreatedBy string    `json:"created_by,omitempty"`
+	Replaced  bool      `json:"replaced,omitempty"` // POST: overwrote the build of the same version
 }
 
 func (a *AdminAPI) bootstrapBuilds(w http.ResponseWriter, r *http.Request) {
@@ -203,5 +204,6 @@ func (a *AdminAPI) bootstrapUpload(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, 200, BootstrapBuild{BuildID: b.ID, Version: b.Version, Size: b.Size, SHA256: b.SHA256, CreatedAt: time.Now()})
+	writeJSON(w, 200, BootstrapBuild{BuildID: b.ID, Version: b.Version, Size: b.Size, SHA256: b.SHA256, CreatedAt: time.Now(),
+		Replaced: b.Replaced})
 }

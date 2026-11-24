@@ -4,7 +4,7 @@
     {{if .Data.Public}}{{if not .Actor.UserID}}<p class="muted"><a href="/login">Вхід в адмінку</a></p>{{end}}
     {{else}}<p class="muted">Без входу ця ж сторінка доступна за адресою <a href="/bootstrap">/bootstrap</a> (для
         виробництва).</p>{{end}}
-    {{if not .Data.Builds}}
+    {{if and (not .Data.Builds) (not .Data.Build)}}
     <div class="flash err">На сервері ще немає збірок bootstrap.{{if isroot .Actor}} Завантажте
         <code>zir3m-bootstrap-&lt;версія&gt;.bin</code> на сторінці <a href="/builds">«Збірки»</a> або
         <code>lcmctl push-bootstrap</code>.{{else}} Попросіть superadmin завантажити її.{{end}}</div>
@@ -33,10 +33,16 @@
         </div>
         <div class="card">
             <h2 style="margin-top:0">2. Запис</h2>
+            {{if .Data.Public}}{{with .Data.Build}}
+            <div class="row">Збірка: <b>bootstrap {{.Version}}</b> <span class="muted">· {{dt .CreatedAt}}</span>
+                <input type="hidden" id="fl-build" value="{{.ID}}" data-version="{{.Version}}"></div>
+            {{else}}<input type="hidden" id="fl-build" value="">{{end}}
+            {{else}}
             <div class="row">Збірка: <select id="fl-build">
                     {{range $i, $b := .Data.Builds}}<option value="{{$b.ID}}" data-version="{{$b.Version}}">bootstrap
-                        {{$b.Version}} · {{dt $b.CreatedAt}}{{if eq $i 0}} (остання){{end}}</option>{{end}}
+                        {{$b.Version}} · {{dt $b.CreatedAt}}{{if eq $i 0}} (поточна, її пише /bootstrap){{end}}</option>{{end}}
                 </select></div>
+            {{end}}
             <div class="row"><label><input type="checkbox" id="fl-erase"> Стерти всю flash перед записом</label></div>
             <p class="muted">Якщо стерти всю flash, прилад доведеться зареєструвати заново.</p>
             <div class="row"><button id="fl-flash" type="button" disabled>Прошити</button></div>

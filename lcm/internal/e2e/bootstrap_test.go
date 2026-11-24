@@ -120,6 +120,46 @@ func TestBootstrapBuilds(t *testing.T) {
 	if len(list) != 2 || list[0].Version != "0.2.0" {
 		t.Fatalf("bootstrap-builds: %+v", list)
 	}
+
+	// The public page writes only the current (last uploaded) bootstrap.
+	cur, ok, err := e.core.CurrentBootstrap(ctx)
+	e.must(err)
+	if !ok || cur.Version != "0.2.0" || cur.ID != rep.BuildID {
+		t.Fatalf("current: %+v", cur)
+	}
+	_, err = e.core.PublicBootstrapFile(ctx, b.ID)
+	e.wantCode(err, "not_found")
+
+	// A fixed image of the same version overwrites it and becomes current.
+	fixed := append(e.bootstrapImage("0.1.0"), bytes.Repeat([]byte{0xA5}, 4096)...)
+	b3, err := e.core.UploadBootstrap(ctx, e.super, fixed)
+	e.must(err)
+	if !b3.Replaced || b3.ID != b.ID {
+		t.Fatalf("replace: %+v", b3)
+	}
+	all, err := e.core.Builds(ctx, "bootstrap")
+	e.must(err)
+	if len(all) != 2 || all[0].ID != b.ID || all[0].SHA256 != b3.SHA256 {
+		t.Fatalf("after replace: %+v", all)
+	}
+	if cur, _, _ := e.core.CurrentBootstrap(ctx); cur.ID != b.ID {
+		t.Fatalf("current after replace: %+v", cur)
+	}
+	p, err := e.core.PublicBootstrapFile(ctx, b.ID)
+	e.must(err)
+	if data, _ := os.ReadFile(p); !bytes.Equal(data, fixed) {
+		t.Fatal("public file is not the replaced image")
+	}
+	_, err = e.core.PublicBootstrapFile(ctx, rep.BuildID)
+	e.wantCode(err, "not_found")
+	var n int
+	e.must(e.core.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='build.replace' AND target_id=$1`, b.ID).Scan(&n))
+	if n != 1 {
+		t.Fatalf("replace audit: %d", n)
+	}
+	// The same bytes again are still a duplicate.
+	_, err = e.core.UploadBootstrap(ctx, e.super, fixed)
+	e.wantCode(err, "duplicate")
 }
 
 // ZIR_BOOTSTRAP_BIN: a real build is accepted only if made for this server,
