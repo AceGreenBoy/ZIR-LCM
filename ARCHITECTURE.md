@@ -597,6 +597,7 @@ magic "ZWWW" | u16 header_len | header JSON {version, www_api, size, sha256}
 | `GET /update` | Проверка обновлений, возвращает манифест и `config_version` |
 | `GET /artifacts/{release}/app`, `GET /artifacts/{release}/www` | Загрузка образов. Поддерживает HTTP Range для докачки. |
 | `GET /dev-artifacts/{build}` | Сборка для разработки, назначенная этому прибору разработчика (без подписи, зашифрована `K_ota`) |
+| `GET /dev-artifacts/{build}/www` | `www.tar`, загруженный вместе со сборкой для разработки (без подписи) |
 | `POST /update/report` | Отчёт об установке |
 | `GET /config`, `POST /config/request` | Получение конфига, запрос на изменение от инженера |
 | `POST /engineer/confirm` | Подтверждение токена или сессии инженера |

@@ -86,7 +86,7 @@ func TestFirmwareClient(t *testing.T) {
 	// Developer device first, while there is no release: it waits for an
 	// offer, gets the dev build assigned after the approval, unsigned.
 	devImg := devImage("main-host1", 5)
-	devBuild, err := e.core.UploadDevApp(ctx, e.super, devImg, nil)
+	devBuild, err := e.core.UploadDevApp(ctx, e.super, devImg, nil, nil)
 	e.must(err)
 	done, img := run("28:05:a5:40:00:02", true, func(id string) {
 		time.Sleep(300 * time.Millisecond) // the client is already asking /update

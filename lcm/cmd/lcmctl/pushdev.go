@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"zir/lcm/internal/core"
 	"zir/lcm/internal/crypto/appdesc"
 	"zir/lcm/internal/httpapi"
 )
@@ -52,30 +53,47 @@ func pushDev(args []string) error {
 	devices := fs.String("devices", "", "серійні номери через кому, all — усі прилади розробника профілю; порожньо — лише завантажити")
 	critical := fs.Bool("critical", false, "критична: прилади ставлять її одразу, без кнопки")
 	elf := fs.String("elf", "", "firmware.elf (за замовчуванням — поруч із .bin, якщо є)")
+	www := fs.String("www", "", "www.tar веб-інтерфейсу: прилад поставить його разом зі збіркою")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: push-dev [-devices S1,S2|all] [-critical] [-elf firmware.elf] <firmware.bin>")
+	if fs.NArg() > 1 || (fs.NArg() == 0 && *www == "") {
+		return fmt.Errorf("usage: push-dev [-devices S1,S2|all] [-critical] [-elf firmware.elf] [-www www.tar] <firmware.bin>\n" +
+			"       push-dev [-devices S1,S2|all] [-critical] -www www.tar   (лише інтерфейс, поверх прошивки на приладі)")
 	}
 	base, token, err := apiEnv()
 	if err != nil {
 		return err
 	}
-	img, err := os.ReadFile(fs.Arg(0))
-	if err != nil {
-		return err
-	}
 	// Check locally first: a clear message beats a round trip.
-	d, err := appdesc.Parse(img)
-	if err != nil {
-		return err
+	var wwwTar []byte
+	var wm core.WWWManifest
+	if *www != "" {
+		if wwwTar, err = os.ReadFile(*www); err != nil {
+			return err
+		}
+		if wm, err = core.CheckWWWTar(wwwTar); err != nil {
+			return fmt.Errorf("%s: %w", *www, err)
+		}
 	}
-	if !d.HasZir || !d.DevBuild() {
-		return fmt.Errorf("%s — не збірка для розробки (потрібен CONFIG_ZIR_DEV_BUILD=y, env esp32dev)", fs.Arg(0))
+	var img []byte
+	if fs.NArg() == 1 {
+		if img, err = os.ReadFile(fs.Arg(0)); err != nil {
+			return err
+		}
+		d, err := appdesc.Parse(img)
+		if err != nil {
+			return err
+		}
+		if !d.HasZir || !d.DevBuild() {
+			return fmt.Errorf("%s — не збірка для розробки (потрібен CONFIG_ZIR_DEV_BUILD=y, env esp32dev)", fs.Arg(0))
+		}
+		if wwwTar != nil && wm.WwwAPI != int(d.WwwAPI) {
+			return fmt.Errorf("www_api інтерфейсу (%d) не збігається з www_api прошивки (%d)", wm.WwwAPI, d.WwwAPI)
+		}
 	}
 	elfPath := *elf
-	if elfPath == "" {
+	if elfPath == "" && img != nil {
 		cand := strings.TrimSuffix(fs.Arg(0), filepath.Ext(fs.Arg(0))) + ".elf"
 		if _, err := os.Stat(cand); err == nil {
 			elfPath = cand
@@ -84,8 +102,10 @@ func pushDev(args []string) error {
 
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
-	fw, _ := mw.CreateFormFile("app", filepath.Base(fs.Arg(0)))
-	fw.Write(img)
+	if img != nil {
+		fw, _ := mw.CreateFormFile("app", filepath.Base(fs.Arg(0)))
+		fw.Write(img)
+	}
 	if elfPath != "" {
 		e, err := os.ReadFile(elfPath)
 		if err != nil {
@@ -93,6 +113,10 @@ func pushDev(args []string) error {
 		}
 		fw, _ := mw.CreateFormFile("elf", filepath.Base(elfPath))
 		fw.Write(e)
+	}
+	if wwwTar != nil {
+		fw, _ := mw.CreateFormFile("www", filepath.Base(*www))
+		fw.Write(wwwTar)
 	}
 	mw.WriteField("devices", *devices)
 	if *critical {
@@ -108,7 +132,14 @@ func pushDev(args []string) error {
 	if err := apiDo(req, token, &rep); err != nil {
 		return err
 	}
-	fmt.Printf("завантажено %s (%s), збірка %s, sha256 %s\n", rep.Version, rep.Profile, rep.BuildID, rep.SHA256[:16])
+	if rep.Kind == "dev_www" {
+		fmt.Printf("завантажено інтерфейс %s, збірка %s, sha256 %s\n", rep.Version, rep.BuildID, rep.SHA256[:16])
+	} else {
+		fmt.Printf("завантажено %s (%s), збірка %s, sha256 %s\n", rep.Version, rep.Profile, rep.BuildID, rep.SHA256[:16])
+		if rep.WWW != "" {
+			fmt.Printf("з інтерфейсом %s\n", rep.WWW)
+		}
+	}
 	switch {
 	case len(rep.Assigned) == 0:
 		fmt.Println("не призначено жодному приладу (див. -devices)")

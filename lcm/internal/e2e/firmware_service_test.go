@@ -167,7 +167,7 @@ func TestFirmwareService(t *testing.T) {
 
 		// A critical dev build: installed at once, battery 5 % does not matter.
 		devImg := devImage("main-svc1", 6)
-		b, err := e.core.UploadDevApp(ctx, e.super, devImg, nil)
+		b, err := e.core.UploadDevApp(ctx, e.super, devImg, nil, nil)
 		e.must(err)
 		_, err = e.core.AssignDevBuild(ctx, e.super, b.ID, []string{devID}, true)
 		e.must(err)
@@ -325,7 +325,7 @@ func TestFirmwareService(t *testing.T) {
 
 		// A dev build cannot reach a release firmware over the air.
 		e.must(e.core.SetDevMode(ctx, e.super, devID, true))
-		b, err := e.core.UploadDevApp(ctx, e.super, devImage("main-svc2", 7), nil)
+		b, err := e.core.UploadDevApp(ctx, e.super, devImage("main-svc2", 7), nil, nil)
 		e.must(err)
 		_, err = e.core.AssignDevBuild(ctx, e.super, b.ID, []string{devID}, true)
 		e.must(err)

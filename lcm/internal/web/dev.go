@@ -34,6 +34,7 @@ func (h *Handler) deviceDevBuild(w http.ResponseWriter, r *http.Request) {
 
 type devData struct {
 	Builds   []core.Build
+	WWW      []core.Build // web UIs (dev_www): alone or uploaded with a build
 	Devices  []core.Device
 	Tokens   []core.APIToken
 	NewToken string
@@ -44,6 +45,9 @@ func (h *Handler) devData(r *http.Request) (devData, error) {
 	var d devData
 	var err error
 	if d.Builds, err = h.Core.Builds(r.Context(), "dev_app"); err != nil {
+		return d, err
+	}
+	if d.WWW, err = h.Core.Builds(r.Context(), "dev_www"); err != nil {
 		return d, err
 	}
 	if d.Devices, err = h.Core.DevDevices(r.Context()); err != nil {
@@ -70,18 +74,31 @@ func (h *Handler) devPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) devUpload(w http.ResponseWriter, r *http.Request) {
-	img, err := formFile(r, "app")
-	if err != nil || img == nil {
-		back(w, r, "/dev", &core.Error{Msg: "оберіть файл образу"}, "")
+	img, _ := formFile(r, "app")
+	www, _ := formFile(r, "www")
+	if img == nil && www == nil {
+		back(w, r, "/dev", &core.Error{Msg: "оберіть образ прошивки, архів інтерфейсу або обидва"}, "")
 		return
 	}
-	elf, _ := formFile(r, "elf")
-	b, err := h.Core.UploadDevApp(r.Context(), actor(r), img, elf)
+	var b core.Build
+	var err error
+	what := ""
+	if img != nil {
+		elf, _ := formFile(r, "elf")
+		b, err = h.Core.UploadDevApp(r.Context(), actor(r), img, elf, www)
+		what = "збірку " + b.Version
+		if b.WWWVersion != "" {
+			what += " з інтерфейсом " + b.WWWVersion
+		}
+	} else {
+		b, err = h.Core.UploadDevWWW(r.Context(), actor(r), www)
+		what = "інтерфейс " + b.Version
+	}
 	if err != nil {
 		back(w, r, "/dev", err, "")
 		return
 	}
-	back(w, r, "/dev?build="+b.ID, nil, "збірку "+b.Version+" завантажено; оберіть прилади й призначте її")
+	back(w, r, "/dev?build="+b.ID, nil, what+" завантажено; оберіть прилади й призначте її")
 }
 
 func (h *Handler) devAssign(w http.ResponseWriter, r *http.Request) {

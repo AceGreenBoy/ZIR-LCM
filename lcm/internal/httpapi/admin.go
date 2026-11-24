@@ -81,20 +81,24 @@ func (a *AdminAPI) devDevices(w http.ResponseWriter, r *http.Request) {
 
 // DevBuildReply is the reply of POST /api/v1/dev-builds.
 type DevBuildReply struct {
+	Kind     string   `json:"kind"` // dev_app | dev_www (web UI alone)
 	BuildID  string   `json:"build_id"`
 	Version  string   `json:"version"`
 	Profile  string   `json:"profile"`
 	SHA256   string   `json:"sha256"`
-	Assigned []string `json:"assigned"` // serials
+	WWW      string   `json:"www,omitempty"` // version of the web UI uploaded with it
+	Assigned []string `json:"assigned"`      // serials
 	Critical bool     `json:"critical"`
 }
 
-// devBuild: multipart form with "app" (firmware.bin), optional "elf",
+// devBuild: multipart form with "app" (firmware.bin), optional "elf" and
+// "www" (www.tar of the web UI, delivered together with the firmware; without
+// "app" - the web UI alone, installed over the firmware the device runs),
 // "devices" (comma-separated serials or ids, "all", or empty to only upload)
 // and "critical" (1/true).
 func (a *AdminAPI) devBuild(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 3*maxAppUpload)
-	if err := r.ParseMultipartForm(3 * maxAppUpload); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, 4*maxAppUpload)
+	if err := r.ParseMultipartForm(4 * maxAppUpload); err != nil {
 		writeErr(w, &core.Error{Status: 400, Code: "bad_request", Msg: "multipart form expected: " + err.Error()})
 		return
 	}
@@ -107,19 +111,25 @@ func (a *AdminAPI) devBuild(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(io.LimitReader(f, maxAppUpload))
 		return b
 	}
-	img := read("app")
-	if img == nil {
-		writeErr(w, &core.Error{Status: 400, Code: "bad_request", Msg: "no app file"})
+	img, www := read("app"), read("www")
+	if img == nil && www == nil {
+		writeErr(w, &core.Error{Status: 400, Code: "bad_request", Msg: "no app or www file"})
 		return
 	}
 	actor := tokenActor(r)
-	b, err := a.Core.UploadDevApp(r.Context(), actor, img, read("elf"))
+	var b core.Build
+	var err error
+	if img != nil {
+		b, err = a.Core.UploadDevApp(r.Context(), actor, img, read("elf"), www)
+	} else {
+		b, err = a.Core.UploadDevWWW(r.Context(), actor, www)
+	}
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	crit := r.FormValue("critical")
-	reply := DevBuildReply{BuildID: b.ID, Version: b.Version, Profile: b.Profile, SHA256: b.SHA256, Assigned: []string{},
+	reply := DevBuildReply{Kind: b.Kind, BuildID: b.ID, Version: b.Version, Profile: b.Profile, SHA256: b.SHA256, WWW: b.WWWVersion, Assigned: []string{},
 		Critical: crit == "1" || crit == "true" || crit == "on"}
 	var devices []string
 	for _, d := range strings.Split(r.FormValue("devices"), ",") {

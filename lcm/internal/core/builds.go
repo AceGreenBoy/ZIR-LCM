@@ -45,7 +45,9 @@ type Build struct {
 	CreatedAt      time.Time
 	CreatedBy      string
 	HasELF         bool
-	Unchanged      bool // comparable hash equals the previous build of the profile
+	Unchanged      bool   // comparable hash equals the previous build of the profile
+	WWWBuildID     string // dev_app: its own web UI (a dev_www build), if any
+	WWWVersion     string
 }
 
 // UploadApp accepts an unsigned app image built for a profile (PlatformIO or
@@ -269,8 +271,10 @@ func (c *Core) Builds(ctx context.Context, kind string) ([]Build, error) {
 	rows, err := c.Pool.Query(ctx, `SELECT b.id, b.kind, COALESCE(p.code,''), b.version, COALESCE(b.www_api,0), COALESCE(b.size,0),
 		encode(b.sha256,'hex'), COALESCE(encode(b.comparable_hash,'hex'),''), b.created_at, COALESCE(u.login,''), b.elf_path IS NOT NULL,
 		COALESCE(b.comparable_hash = (SELECT p2.comparable_hash FROM builds p2 WHERE p2.kind=b.kind AND p2.profile_id=b.profile_id
-			AND p2.created_at < b.created_at ORDER BY p2.created_at DESC LIMIT 1), false)
+			AND p2.created_at < b.created_at ORDER BY p2.created_at DESC LIMIT 1), false),
+		COALESCE(b.www_build_id::text,''), COALESCE(w.version,'')
 		FROM builds b LEFT JOIN hw_profiles p ON p.id=b.profile_id LEFT JOIN users u ON u.id=b.created_by
+		LEFT JOIN builds w ON w.id=b.www_build_id
 		WHERE b.status='success' AND ($1='' OR b.kind=$1) ORDER BY b.created_at DESC LIMIT 200`, kind)
 	if err != nil {
 		return nil, err
@@ -280,7 +284,7 @@ func (c *Core) Builds(ctx context.Context, kind string) ([]Build, error) {
 	for rows.Next() {
 		var b Build
 		if err := rows.Scan(&b.ID, &b.Kind, &b.Profile, &b.Version, &b.WwwAPI, &b.Size, &b.SHA256, &b.ComparableHash,
-			&b.CreatedAt, &b.CreatedBy, &b.HasELF, &b.Unchanged); err != nil {
+			&b.CreatedAt, &b.CreatedBy, &b.HasELF, &b.Unchanged, &b.WWWBuildID, &b.WWWVersion); err != nil {
 			return nil, err
 		}
 		out = append(out, b)

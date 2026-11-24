@@ -43,7 +43,7 @@ const usage = `lcmctl — адміністрування сервера прош
   reset-totp <login>               скинути TOTP (втрачено телефон): налаштування при наступному вході
 
 Через API працюючого сервера (LCM_URL, LCM_TOKEN; БД не потрібна):
-  push-dev [-devices S1,S2|all] [-critical] <firmware.bin>
+  push-dev [-devices S1,S2|all] [-critical] [-www www.tar] [<firmware.bin>]   (без .bin — лише інтерфейс)
                                    завантажити збірку для розробки й призначити приладам розробника
   dev-devices                      прилади розробника і їхні збірки
   push-bootstrap <zir3m-bootstrap-X.bin>

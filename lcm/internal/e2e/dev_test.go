@@ -110,11 +110,11 @@ func TestDevBuilds(t *testing.T) {
 	user := e.registerDev("28:05:a5:20:00:02", false)
 
 	// Upload checks: dev flag required, superadmin only.
-	_, err := e.core.UploadDevApp(ctx, e.super, appdesc.Build("1.0.0", "zir3m-full", 3, 0, make([]byte, 100)), nil)
+	_, err := e.core.UploadDevApp(ctx, e.super, appdesc.Build("1.0.0", "zir3m-full", 3, 0, make([]byte, 100)), nil, nil)
 	e.wantCode(err, "not_dev_build")
-	_, err = e.core.UploadDevApp(ctx, e.eng, devImage("0.9.0-dev", 1), nil)
+	_, err = e.core.UploadDevApp(ctx, e.eng, devImage("0.9.0-dev", 1), nil, nil)
 	e.wantCode(err, "forbidden")
-	b1, err := e.core.UploadDevApp(ctx, e.super, devImage("main-3f2a1c", 1), nil)
+	b1, err := e.core.UploadDevApp(ctx, e.super, devImage("main-3f2a1c", 1), nil, nil)
 	e.must(err)
 
 	// Only developer devices take dev builds.
@@ -159,7 +159,7 @@ func TestDevBuilds(t *testing.T) {
 	}
 
 	// Critical: installed without asking, "all" picks every developer device.
-	b2, err := e.core.UploadDevApp(ctx, e.super, devImage("main-4b0c9d", 2), nil)
+	b2, err := e.core.UploadDevApp(ctx, e.super, devImage("main-4b0c9d", 2), nil, nil)
 	e.must(err)
 	_, err = e.core.AssignDevBuild(ctx, e.super, b2.ID, []string{"all"}, true)
 	e.must(err)
@@ -269,5 +269,168 @@ func TestPushDevAPI(t *testing.T) {
 	e.must(e.core.RevokeAPIToken(ctx, e.super, list[0].ID))
 	if code, _ := push(tok, devImage("main-cccc", 3), "", ""); code != 401 {
 		t.Fatalf("revoked token: %d", code)
+	}
+}
+
+// A dev build may carry its own unsigned www.tar: the device gets it with the
+// firmware, and a new build with the same firmware updates only the web UI.
+func TestDevBuildWWW(t *testing.T) {
+	e := setup(t)
+	ctx := e.ctx
+	e.profile()
+	dev := e.registerDev("28:05:a5:40:00:01", true)
+	other := e.registerDev("28:05:a5:40:00:02", true)
+
+	img := devImage("main-ui01", 1) // www_api 3
+	_, err := e.core.UploadDevApp(ctx, e.super, img, nil, wwwTar(t, "1.0.0", 2))
+	e.wantCode(err, "www_api_mismatch")
+	_, err = e.core.UploadDevApp(ctx, e.super, img, nil, []byte("not a tar"))
+	e.wantCode(err, "bad_tar")
+	b1, err := e.core.UploadDevApp(ctx, e.super, img, nil, wwwTar(t, "1.1.0-dev", 3))
+	e.must(err)
+	if b1.WWWVersion != "1.1.0-dev" || b1.WWWBuildID == "" {
+		t.Fatalf("build: %+v", b1)
+	}
+	// The dev UI never becomes a release UI.
+	_, err = e.core.CreateRelease(ctx, e.super, core.ReleaseInput{Version: "9.9.9", WWWBuildID: b1.WWWBuildID})
+	if err == nil {
+		t.Fatal("dev www accepted into a release")
+	}
+
+	_, err = e.core.AssignDevBuild(ctx, e.super, b1.ID, []string{dev.State.Serial}, false)
+	e.must(err)
+	m, err := dev.CheckUpdate(ctx)
+	e.must(err)
+	if m == nil || !m.App.Needed || m.WWW == nil || !m.WWW.Needed || m.WWW.Version != "1.1.0-dev" || m.WWW.WwwAPI != 3 {
+		t.Fatalf("dev offer with www: %+v", m)
+	}
+	// Served only to the device the build is assigned to.
+	_, err = other.Download(ctx, m.WWW.URL)
+	e.wantCode(err, "not_found")
+	e.must(dev.Install(ctx, m))
+	if dev.LastWWW == nil {
+		t.Fatal("www not installed")
+	}
+	e.must(dev.Auth(ctx))
+	if m, _ := dev.CheckUpdate(ctx); m != nil {
+		t.Fatalf("offer after install: %+v", m)
+	}
+
+	// Same firmware, new UI: only www is needed.
+	b2, err := e.core.UploadDevApp(ctx, e.super, img, nil, wwwTar(t, "1.2.0-dev", 3))
+	e.must(err)
+	_, err = e.core.AssignDevBuild(ctx, e.super, b2.ID, []string{dev.State.Serial}, true)
+	e.must(err)
+	m, err = dev.CheckUpdate(ctx)
+	e.must(err)
+	if m == nil || m.App.Needed || m.WWW == nil || !m.WWW.Needed || m.WWW.Version != "1.2.0-dev" {
+		t.Fatalf("www-only dev offer: %+v", m)
+	}
+	e.must(dev.Install(ctx, m))
+	// Installed per the report, even before the next session.
+	if m, _ := dev.CheckUpdate(ctx); m != nil {
+		t.Fatalf("offer after www-only install: %+v", m)
+	}
+	if dd, _ := e.core.Device(ctx, dev.State.DeviceID); !dd.DevInstalled {
+		t.Fatalf("device view: %+v", dd)
+	}
+}
+
+// A web UI pushed alone goes over the dev firmware the device runs.
+func TestDevWWWAlone(t *testing.T) {
+	e := setup(t)
+	ctx := e.ctx
+	e.profile()
+	dev := e.registerDev("28:05:a5:50:00:01", true)
+	fresh := e.registerDev("28:05:a5:50:00:02", true) // no dev firmware known to the server
+	user := e.registerDev("28:05:a5:50:00:03", false)
+
+	// The device runs a dev build (www_api 3) with a web UI.
+	b1, err := e.core.UploadDevApp(ctx, e.super, devImage("main-ww01", 1), nil, wwwTar(t, "1.0.0", 3))
+	e.must(err)
+	_, err = e.core.AssignDevBuild(ctx, e.super, b1.ID, []string{dev.State.Serial}, true)
+	e.must(err)
+	m, err := dev.CheckUpdate(ctx)
+	e.must(err)
+	e.must(dev.Install(ctx, m))
+	e.must(dev.Auth(ctx))
+
+	_, err = e.core.UploadDevWWW(ctx, e.eng, wwwTar(t, "1.1.0", 3))
+	e.wantCode(err, "forbidden")
+	w2, err := e.core.UploadDevWWW(ctx, e.super, wwwTar(t, "1.1.0-dev", 3))
+	e.must(err)
+
+	// Explicit devices must fit; "all" skips those that don't.
+	_, err = e.core.AssignDevBuild(ctx, e.super, w2.ID, []string{user.State.Serial}, false)
+	e.wantCode(err, "not_dev_device")
+	_, err = e.core.AssignDevBuild(ctx, e.super, w2.ID, []string{fresh.State.Serial}, false)
+	e.wantCode(err, "no_dev_firmware")
+	wOld, err := e.core.UploadDevWWW(ctx, e.super, wwwTar(t, "0.9.0", 2))
+	e.must(err)
+	_, err = e.core.AssignDevBuild(ctx, e.super, wOld.ID, []string{dev.State.Serial}, false)
+	e.wantCode(err, "www_api_mismatch")
+	_, err = e.core.AssignDevBuild(ctx, e.super, wOld.ID, []string{"all"}, false)
+	e.wantCode(err, "no_devices")
+
+	got, err := e.core.AssignDevBuild(ctx, e.super, w2.ID, []string{"all"}, false)
+	e.must(err)
+	if len(got) != 1 || got[0] != dev.State.Serial {
+		t.Fatalf("assigned %v", got)
+	}
+	m, err = dev.CheckUpdate(ctx)
+	e.must(err)
+	if m == nil || !m.Dev || m.DevBuildID != b1.ID || m.App.Needed || m.WWW == nil || !m.WWW.Needed ||
+		m.WWW.Version != "1.1.0-dev" || m.Version != "www 1.1.0-dev" || m.Mode != "button" {
+		t.Fatalf("www-only offer: %+v www=%+v", m, m.WWW)
+	}
+	_, err = fresh.Download(ctx, m.WWW.URL)
+	e.wantCode(err, "not_found")
+	e.must(dev.Install(ctx, m))
+	if dev.State.AppVersion != "main-ww01" {
+		t.Fatalf("firmware changed: %s", dev.State.AppVersion)
+	}
+	if m, _ := dev.CheckUpdate(ctx); m != nil {
+		t.Fatalf("offer after install: %+v", m)
+	}
+	if dd, _ := e.core.Device(ctx, dev.State.DeviceID); !dd.DevInstalled || !strings.Contains(dd.DevBuild, "1.1.0-dev") {
+		t.Fatalf("device view: %+v", dd)
+	}
+
+	// A firmware-only build drops the UI assignment; the installed UI stays.
+	b2, err := e.core.UploadDevApp(ctx, e.super, devImage("main-ww02", 2), nil, nil)
+	e.must(err)
+	_, err = e.core.AssignDevBuild(ctx, e.super, b2.ID, []string{dev.State.Serial}, true)
+	e.must(err)
+	m, err = dev.CheckUpdate(ctx)
+	e.must(err)
+	if m == nil || !m.App.Needed || m.WWW != nil || m.Version != "main-ww02" {
+		t.Fatalf("firmware-only offer: %+v", m)
+	}
+
+	// Through /api/v1: www without app.
+	tok, err := e.core.CreateAPIToken(ctx, e.super, "web-ui")
+	e.must(err)
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("www", "www.tar")
+	fw.Write(wwwTar(t, "1.2.0-dev", 3))
+	mw.WriteField("devices", "all")
+	mw.Close()
+	req, _ := http.NewRequest("POST", e.srv.URL+"/api/v1/dev-builds", &body)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	e.must(err)
+	var rep httpapi.DevBuildReply
+	json.NewDecoder(resp.Body).Decode(&rep)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || rep.Kind != "dev_www" || rep.Version != "1.2.0-dev" || len(rep.Assigned) != 1 {
+		t.Fatalf("push www: %d %+v", resp.StatusCode, rep)
+	}
+	// The pending firmware b2 stays assigned; both come in one offer.
+	m, err = dev.CheckUpdate(ctx)
+	e.must(err)
+	if m == nil || m.DevBuildID != b2.ID || !m.App.Needed || m.WWW == nil || m.WWW.Version != "1.2.0-dev" {
+		t.Fatalf("firmware + www offer: %+v", m)
 	}
 }

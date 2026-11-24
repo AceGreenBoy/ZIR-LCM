@@ -35,6 +35,7 @@ func (a *API) Routes() http.Handler {
 		r.Get("/update", a.update)
 		r.Get("/artifacts/{release}/{kind}", a.artifact)
 		r.Get("/dev-artifacts/{build}", a.devArtifact)
+		r.Get("/dev-artifacts/{build}/www", a.devWWW)
 		r.Post("/update/report", a.report)
 		r.Get("/config", a.config)
 		r.Post("/web-password", a.webPassword)
@@ -191,6 +192,11 @@ func (a *API) artifact(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) devArtifact(w http.ResponseWriter, r *http.Request) {
 	path, err := a.Core.DevImagePath(r.Context(), devSession(r), chi.URLParam(r, "build"))
+	serveFile(w, r, path, err)
+}
+
+func (a *API) devWWW(w http.ResponseWriter, r *http.Request) {
+	path, err := a.Core.DevWWWPath(r.Context(), devSession(r), chi.URLParam(r, "build"))
 	serveFile(w, r, path, err)
 }
 

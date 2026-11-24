@@ -261,7 +261,7 @@ type Manifest struct {
 	ReleaseID string `json:"release_id"`
 	// Dev build offer: release_id is empty, the image is unsigned
 	// (CONFIG_ZIR_DEV_BUILD) and only a device whose config has "dev": true
-	// may install it. www is not part of a dev offer.
+	// may install it. www, if present, is the dev build's own unsigned www.tar.
 	DevBuildID string       `json:"dev_build_id,omitempty"`
 	Dev        bool         `json:"dev,omitempty"`
 	Version    string       `json:"version"`
@@ -320,7 +320,7 @@ func (c *Core) CheckUpdate(ctx context.Context, s DeviceSession) (UpdateReply, e
 		return reply, err
 	}
 	if offer.DevBuildID != "" {
-		m, err := c.devManifest(ctx, s, offer, appSHA)
+		m, err := c.devManifest(ctx, s, offer, appSHA, wwwSHA)
 		if err != nil {
 			return reply, err
 		}

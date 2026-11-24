@@ -62,8 +62,16 @@ bin/devicesim -server http://localhost:8090 -state dev1.json watch      # при
 export LCM_URL=http://localhost:8090 LCM_TOKEN=zirlcm_...
 bin/lcmctl push-dev -devices ZIR-7K2Q9XM,ZIR-B4N8T0C -critical .pio/build/esp32dev/firmware.bin
 bin/lcmctl push-dev -devices all firmware.bin    # усім приладам розробника профілю збірки
+bin/lcmctl push-dev -devices all -www ../../zir-web-ui/www.tar firmware.bin   # разом з веб-інтерфейсом
+bin/lcmctl push-dev -devices all -www ../../zir-web-ui/www.tar                # лише інтерфейс (у zir-web-ui: npm run push)
 bin/lcmctl dev-devices                           # що на яких приладах
 ```
+
+До збірки можна додати `www.tar` веб-інтерфейсу (`npm run pack` у `zir-web-ui`): `-www`, поле «Інтерфейс»
+в адмінці або `LCM_WWW=<шлях> pio run -e esp32dev -t lcm` (чи `custom_lcm_www` у `platformio.ini`).
+Архів не підписується, `www_api` у його `manifest.json` має збігатися з прошивкою. Без `.bin` відправляється
+лише інтерфейс: прилад ставить його поверх збірки розробника, що вже на ньому, без перезавантаження. При `all`
+прилади з бойовою чи невідомою серверу прошивкою або з іншим `www_api` пропускаються.
 
 Клієнт прошивки (`ZIR_3M/components/lcm_client`) перевіряється проти цього сервера:
 `ZIR_3M/test/lcm_host/run.sh` (вектори — `go run ./cmd/fwvectors`, протокол — `TestFirmwareClient`).

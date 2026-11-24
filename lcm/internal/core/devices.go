@@ -265,9 +265,9 @@ type Device struct {
 	// Developer device and the dev build assigned to it.
 	DevMode       bool
 	DevBuildID    string
-	DevBuild      string // version of the assigned dev build
+	DevBuild      string // version of the assigned dev build (+ www version)
 	DevCritical   bool
-	DevInstalled  bool // the device reports the assigned dev build's hash
+	DevInstalled  bool // the device reports the assigned dev build's hashes (app and www)
 	DevAssignedAt *time.Time
 }
 
@@ -275,10 +275,12 @@ const deviceSelect = `SELECT d.id, d.serial, d.mac, d.chip_rev, p.code, p.id, d.
 	COALESCE(d.current_version,''), COALESCE(cr.version,''), COALESCE(pr.version,''), COALESCE(d.pending_release_id::text,''),
 	d.config_version, COALESCE(c.hard_params,'{}'), d.registered_at, COALESCE(u.login,''), d.last_seen_at,
 	COALESCE(host(d.last_ip),''), COALESCE(d.revoke_reason,''), d.web_password_changed_at,
-	d.dev_mode, COALESCE(d.dev_build_id::text,''), COALESCE(dvb.version,''), d.dev_critical,
-	COALESCE(dvb.sha256 = d.current_app_sha256, false), d.dev_assigned_at
+	d.dev_mode, COALESCE(d.dev_build_id::text,''), COALESCE(dvb.version || COALESCE(' + www ' || dvw.version, ''), ''), d.dev_critical,
+	COALESCE(dvb.sha256 = d.current_app_sha256, false) AND (dvw.id IS NULL OR COALESCE(dvw.sha256 = d.current_www_sha256, false)),
+	d.dev_assigned_at
 	FROM devices d JOIN hw_profiles p ON p.id=d.profile_id
 	LEFT JOIN builds dvb ON dvb.id=d.dev_build_id
+	LEFT JOIN builds dvw ON dvw.id=d.dev_www_build_id
 	LEFT JOIN releases cr ON cr.id=d.current_release_id
 	LEFT JOIN releases pr ON pr.id=d.pending_release_id
 	LEFT JOIN users u ON u.id=d.registered_by
