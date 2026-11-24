@@ -314,6 +314,9 @@ func (c *Core) CheckUpdate(ctx context.Context, s DeviceSession) (UpdateReply, e
 	reply.PollAfter = PollRegular
 	if dev {
 		reply.PollAfter = PollDev
+		if err := c.autoDevWWW(ctx, s.DeviceID); err != nil {
+			return reply, err
+		}
 	}
 	offer, err := c.SelectUpdate(ctx, s.DeviceID)
 	if err != nil || offer == nil {

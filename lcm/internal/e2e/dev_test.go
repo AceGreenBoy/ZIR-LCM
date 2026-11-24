@@ -434,3 +434,63 @@ func TestDevWWWAlone(t *testing.T) {
 		t.Fatalf("firmware + www offer: %+v", m)
 	}
 }
+
+// A developer device with no web UI gets the newest one that fits its dev
+// build by www_api, dev or release, without an explicit assignment.
+func TestDevWWWAuto(t *testing.T) {
+	e := setup(t)
+	ctx := e.ctx
+	e.profile()
+	dev := e.registerDev("28:05:a5:60:00:01", true)
+
+	relWWW, err := e.core.UploadWWW(ctx, e.super, wwwTar(t, "1.0.0", 3))
+	e.must(err)
+	_, err = e.core.UploadDevWWW(ctx, e.super, wwwTar(t, "2.0.0-dev", 2)) // newer, other www_api
+	e.must(err)
+
+	b1, err := e.core.UploadDevApp(ctx, e.super, devImage("main-auto1", 1), nil, nil) // www_api 3
+	e.must(err)
+	_, err = e.core.AssignDevBuild(ctx, e.super, b1.ID, []string{dev.State.Serial}, true)
+	e.must(err)
+	// Like bootstrap: firmware and the release UI in one offer.
+	m, err := dev.CheckUpdate(ctx)
+	e.must(err)
+	if m == nil || !m.App.Needed || m.WWW == nil || m.WWW.Version != "1.0.0" {
+		t.Fatalf("offer: %+v www=%+v", m, m.WWW)
+	}
+	e.must(dev.Install(ctx, m))
+	e.must(dev.Auth(ctx))
+	if m, _ := dev.CheckUpdate(ctx); m != nil {
+		t.Fatalf("offer after install: %+v", m)
+	}
+	var n int
+	e.must(e.core.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action='device.dev_www' AND actor_type='system'
+		AND details->>'www_build_id'=$1`, relWWW).Scan(&n))
+	if n != 1 {
+		t.Fatalf("auto assignment audit: %d", n)
+	}
+
+	// The device has a UI now: a newer fitting one is not pushed on it.
+	b2, err := e.core.UploadDevApp(ctx, e.super, devImage("main-auto2", 2), nil, nil)
+	e.must(err)
+	_, err = e.core.UploadDevWWW(ctx, e.super, wwwTar(t, "1.1.0-dev", 3))
+	e.must(err)
+	_, err = e.core.AssignDevBuild(ctx, e.super, b2.ID, []string{dev.State.Serial}, true)
+	e.must(err)
+	m, err = dev.CheckUpdate(ctx)
+	e.must(err)
+	if m == nil || !m.App.Needed || m.WWW != nil {
+		t.Fatalf("firmware-only offer to a device with a UI: %+v", m)
+	}
+
+	// A fresh developer device picks the newest fitting one: the dev UI 1.1.0-dev.
+	fresh := e.registerDev("28:05:a5:60:00:02", true)
+	_, err = e.core.AssignDevBuild(ctx, e.super, b2.ID, []string{fresh.State.Serial}, true)
+	e.must(err)
+	m, err = fresh.CheckUpdate(ctx)
+	e.must(err)
+	if m == nil || m.WWW == nil || m.WWW.Version != "1.1.0-dev" {
+		t.Fatalf("fresh device offer: %+v", m)
+	}
+	e.must(fresh.Install(ctx, m))
+}

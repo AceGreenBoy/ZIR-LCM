@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"zir/lcm/internal/audit"
 	"zir/lcm/internal/crypto/appdesc"
 	"zir/lcm/internal/crypto/encimg"
 	"zir/lcm/internal/crypto/espsig"
@@ -405,6 +406,32 @@ func (c *Core) DevDevices(ctx context.Context) ([]Device, error) {
 	return out, rows.Err()
 }
 
+// autoDevWWW gives a developer device that has no web UI at all (just out of
+// bootstrap, or running a dev build pushed without one) the newest web UI that
+// fits its assigned dev build by www_api: a dev UI or a release UI, whichever
+// was uploaded last. It is stored as an ordinary assignment. An explicit
+// assignment, or any UI already on the device, is left alone.
+func (c *Core) autoDevWWW(ctx context.Context, deviceID string) error {
+	return db.InTx(ctx, c.Pool, func(tx pgxTx) error {
+		var wwwID, version string
+		err := tx.QueryRow(ctx, `SELECT w.id::text, w.version FROM devices d JOIN builds b ON b.id=d.dev_build_id
+			JOIN builds w ON w.kind IN ('dev_www','www') AND w.status='success' AND w.www_api=b.www_api
+			WHERE d.id::text=$1 AND d.dev_mode AND d.status='active' AND d.dev_www_build_id IS NULL AND d.current_www_sha256 IS NULL
+			ORDER BY w.created_at DESC LIMIT 1 FOR UPDATE OF d`, deviceID).Scan(&wwwID, &version)
+		if db.IsNoRows(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE devices SET dev_www_build_id=$2 WHERE id::text=$1`, deviceID, wwwID); err != nil {
+			return err
+		}
+		return audit.Log(ctx, tx, audit.Entry{ActorType: "system", Action: "device.dev_www", TargetType: "device",
+			TargetID: audit.Str(deviceID), Details: map[string]any{"www_build_id": wwwID, "version": version, "auto": true}})
+	})
+}
+
 // devOffer is the dev part of SelectUpdate: the assigned build until the
 // device runs it (and the assigned web UI, if any), then nothing (the device
 // stays on it). When only the web UI is missing, the offer is named after it.
@@ -471,7 +498,7 @@ func (c *Core) DevWWWPath(ctx context.Context, s DeviceSession, buildID string) 
 	var p string
 	err := c.Pool.QueryRow(ctx, `SELECT w.artifact_path FROM devices d JOIN builds b ON b.id=d.dev_build_id
 		JOIN builds w ON w.id=d.dev_www_build_id
-		WHERE d.id::text=$1 AND d.dev_mode AND b.id::text=$2 AND b.kind='dev_app' AND w.kind='dev_www'`, s.DeviceID, buildID).Scan(&p)
+		WHERE d.id::text=$1 AND d.dev_mode AND b.id::text=$2 AND b.kind='dev_app' AND w.kind IN ('dev_www','www')`, s.DeviceID, buildID).Scan(&p)
 	if db.IsNoRows(err) {
 		return "", userErr(404, "not_found", "this dev build is not assigned to the device or has no www")
 	}
